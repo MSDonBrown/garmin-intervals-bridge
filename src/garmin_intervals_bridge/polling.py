@@ -29,6 +29,8 @@ log = logging.getLogger(__name__)
 
 HOT_MINUTES = 60                # after a new activity: fast, a second one may follow
 NOW_KEY = "poll:now"            # "Check now" on the web page
+NEW_KEY = "poll:new"            # upload mode: when a poll or full run last found a new activity
+ASK_GAP = 30                    # "Check now" right after a look waits this long (no button hammering)
 PAUSE_KEY = "intervals:paused_until"    # Intervals answered 429: nothing until then
 PLAN_KEY = "poll:plan"          # adaptive: the learned week, worked out once a day
 QUIET_DEFAULT = 1800            # adaptive, unusual hours, without BRIDGE_POLL_QUIET_SECONDS
@@ -40,6 +42,8 @@ FAST_SHARE, MIDDLE_SHARE = 0.8, 0.97
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 # Set by the web page's "Check now": a `run` in the same process stops waiting at once.
 POLL_NOW = threading.Event()
+# What a `run` in this process actually uses (its --mode and --poll-seconds), for its web page.
+ACTIVE: dict = {}
 
 
 def fast_seconds(settings: Any, mode: str = "enrich") -> int:
@@ -178,8 +182,19 @@ def hours_text(tiers: str, level: str = "2") -> str:
 
 def hot_since(store: Any) -> float:
     """When an activity last came in, or someone asked on the web page; 0 if never."""
-    asked = store.get_meta(NOW_KEY)
-    return max(store.last_new_activity() or 0.0, float(asked) if asked else 0.0)
+    marks = [store.get_meta(key) for key in (NOW_KEY, NEW_KEY)]
+    return max([store.last_new_activity() or 0.0] + [float(m) for m in marks if m])
+
+
+def note_new(store: Any, now: float) -> None:
+    """Upload mode found a new activity (the watch's own record covers enrich mode)."""
+    store.set_meta(NEW_KEY, f"{now:.0f}")
+
+
+def last_look(store: Any, mode: str = "enrich") -> float | None:
+    """The last look for new activities; in upload mode a full run reads Garmin's list too."""
+    looks = [store.last_run("watch")] + ([store.last_run("sync")] if mode == "upload" else [])
+    return max((t for t in looks if t is not None), default=None)
 
 
 def interval(settings: Any, store: Any, now: float, fast: int) -> tuple[int | None, str]:
@@ -208,11 +223,11 @@ def interval(settings: Any, store: Any, now: float, fast: int) -> tuple[int | No
     return fast, "the usual pace"
 
 
-def due(settings: Any, store: Any, now: float, fast: int) -> tuple[bool, str]:
+def due(settings: Any, store: Any, now: float, fast: int, mode: str = "enrich") -> tuple[bool, str]:
     """Look for new activities now? And why (not)."""
-    last = store.last_run("watch")
+    last = last_look(store, mode)
     asked = store.get_meta(NOW_KEY)
-    if asked and (last is None or float(asked) > last):
+    if asked and (last is None or (float(asked) > last and now - last >= ASK_GAP)):
         return True, "asked on the web page"
     wanted, why = interval(settings, store, now, fast)
     if wanted is None:
@@ -220,6 +235,18 @@ def due(settings: Any, store: Any, now: float, fast: int) -> tuple[bool, str]:
     if last is None or now - last >= wanted - SLACK:
         return True, why
     return False, f"{why}: every {span(wanted)}, the last {span(now - last)} ago"
+
+
+def seconds_to_next(settings: Any, store: Any, now: float, fast: int, mode: str = "enrich") -> float | None:
+    """How long until the next look is due (0: now); None while none is planned."""
+    last = last_look(store, mode)
+    asked = store.get_meta(NOW_KEY)
+    if asked and last is not None and float(asked) > last:
+        return max(0.0, last + ASK_GAP - now)
+    wanted, _ = interval(settings, store, now, fast)
+    if wanted is None:
+        return None
+    return 0.0 if last is None else max(0.0, last + wanted - now)
 
 
 def schedule_text(settings: Any, store: Any, now: float, fast: int) -> str:

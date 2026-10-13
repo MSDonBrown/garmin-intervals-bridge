@@ -42,8 +42,21 @@ def test_the_form_becomes_the_settings(tmp_path, monkeypatch):
     assert s.intervals_api_key == ""                                    # empty: not set (backup needs none)
 
 
+class Offline:
+    """An Intervals that cannot be reached – at once, without the network."""
+
+    def __init__(self, *a, **k):
+        pass
+
+    def __getattr__(self, name):
+        def fail(*a, **k):
+            raise ConnectionError("offline (test)")
+        return fail
+
+
 def test_the_page_answers_only_home_assistants_ingress(env, monkeypatch):  # noqa: F811
-    ui = webui.UI(host="0.0.0.0", port=0, in_run=True, ingress=True, newer_release=lambda: None)
+    ui = webui.UI(host="0.0.0.0", port=0, in_run=True, ingress=True, newer_release=lambda: None,
+                  intervals_client=Offline)
     server = webui.make_server(ui)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:

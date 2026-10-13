@@ -243,6 +243,8 @@ def _gear_recent(settings: Settings, store: Store, intervals: IntervalsClient, *
     try:
         return sync_gear_recent(settings, store, intervals, apply=apply)
     except Exception as exc:
+        if rate_limited(exc) is not None:                # Intervals asked for a break: the run pauses
+            raise
         logging.getLogger("bridge").warning("Gear not synced this time: %s", type(exc).__name__)
         return {"error": type(exc).__name__}
 
@@ -262,10 +264,11 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
     log = logging.getLogger("bridge")
     intervals = IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
     garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
-    next_sync, next_health, count = 0.0, time.time() + 300, 0
+    next_sync, next_health, count, failures = 0.0, time.time() + 300, 0, 0
     tick = min(TICK_SECONDS, poll_seconds)
     # only a web page in this process can wake the loop ("Check now"); one elsewhere waits for the tick
     waker = polling.POLL_NOW if getattr(settings, "ui_port", None) else None
+    polling.ACTIVE.update(fast=poll_seconds, mode=mode)
     log.info("garmin-intervals-bridge %s running (%s mode): polls %s; full run every %d min, %s", __version__,
              mode, polling.schedule_text(settings, store, time.time(), poll_seconds), sync_minutes,
              "writing to Intervals" if apply else "DRY RUN (add --apply to write)")
@@ -297,7 +300,10 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                             results["gear"] = gear_result
                 results["wellness"] = sync_wellness(settings, garmin, intervals, store, apply=apply)
                 results["garmin_requests"] = garmin.requests
-                store.record_run("sync", results)
+                store.record_run("sync", results, started=now)
+                if mode == "upload" and (results["activities"].get("uploaded") or results["activities"].get(
+                        "would_upload")):
+                    polling.note_new(store, now)
                 if garmin.client is not None:
                     notices.garmin_ok(store)
                 a, w = results["activities"], results["wellness"]
@@ -309,8 +315,8 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 done = a.get(key, 0)
                 log.info("Full run: %d activities seen, %d %s; wellness %d days checked, %d written; "
                          "%d Garmin requests", a["seen"], done, label, w["days_checked"], w["writes"], garmin.requests)
-                next_sync = now + sync_minutes * 60
-            elif not polling.due(settings, store, now, poll_seconds)[0]:
+                next_sync, failures = now + sync_minutes * 60, 0
+            elif not polling.due(settings, store, now, poll_seconds, mode)[0]:
                 pass                                    # quiet hours, or not yet: the full runs go on
             elif mode == "upload":
                 garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
@@ -319,8 +325,10 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 if result.get("uploaded"):
                     result["gear"] = _gear_recent(settings, store, intervals, apply=apply)
                 result["wellness"] = wellness_check(settings, garmin, intervals, store, apply=apply)
-                store.record_run("watch", {"apply": apply, "mode": mode, "garmin_requests": garmin.requests, **result})
+                store.record_run("watch", {"apply": apply, "mode": mode, "garmin_requests": garmin.requests, **result},
+                                 started=now)
                 if result.get("uploaded") or result.get("would_upload"):
+                    polling.note_new(store, now)
                     log.info("Garmin poll: %d uploaded, %d would upload", result["uploaded"], result["would_upload"])
             else:
                 # the poll shares the full run's Garmin session: count only its own requests
@@ -329,11 +337,12 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 wellness = wellness_check(settings, garmin, intervals, store, apply=apply)
                 if wellness.get("intervals_checks"):
                     result["wellness"] = wellness
-                store.record_run("watch", {"apply": apply, "garmin_requests": garmin.requests - before, **result})
+                store.record_run("watch", {"apply": apply, "garmin_requests": garmin.requests - before, **result},
+                                 started=now)
                 if result["new"]:
                     log.info("Poll: %d new, %d enriched, %d planned", result["new"], result["enriched"],
                              result["planned"])
-            if now >= next_health:
+            if now >= next_health and not intervals_paused(store):
                 report = probe(settings, garmin, intervals, store)
                 for finding in report.get("findings", []):
                     (log.warning if finding.get("alert") else log.info)("Health: %s - %s", finding.get("what"),
@@ -358,12 +367,18 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 log.error("HTTP/API request failed: %s", type(exc).__name__)
             else:
                 log.error("%s: %s", type(exc).__name__, exc)
+            if now >= next_sync:             # the full run failed: again after a growing break, not each tick
+                failures += 1
+                next_sync = max(next_sync, time.time() + min(sync_minutes * 60, 300 * 2 ** (failures - 1)))
         if iterations is None or count < iterations:
+            # wake when the next look is due (within a tick), for a full run at the latest
+            wait = polling.seconds_to_next(settings, store, time.time(), poll_seconds, mode)
+            pause = max(1.0, min(tick, wait if wait is not None else tick, max(0.0, next_sync - time.time()) or tick))
             if waker is not None:
-                waker.wait(tick)
+                waker.wait(pause)
                 waker.clear()
             else:
-                time.sleep(tick)
+                time.sleep(pause)
     return 0
 
 
@@ -583,7 +598,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Pending lock cleared locally for {args.activity_id}. Next sync will recheck remote.")
                     return 0
                 if args.cmd == "health":
-                    intervals = IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
+                    intervals = (IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
+                                 if settings.intervals_api_key and settings.mode != "backup" else None)
                     garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
                     report = probe(settings, garmin, intervals, store)
                     print(json.dumps(report, indent=2))
@@ -754,9 +770,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(json.dumps({"apply": getattr(args, "apply", False),
                                       "skipped": "Intervals asked for a pause (HTTP 429)"}))
                     return 0
+                started = time.time()
                 if args.cmd == "watch":
                     # the timer starts it every minute; when to look is decided here
-                    due, why = polling.due(settings, store, time.time(), polling.fast_seconds(settings))
+                    due, why = polling.due(settings, store, started, polling.fast_seconds(settings))
                     if not due:
                         print(json.dumps({"apply": args.apply, "skipped": why}))
                         return 0
@@ -770,11 +787,13 @@ def main(argv: list[str] | None = None) -> int:
                     record = {"apply": args.apply, "garmin_requests": garmin.requests, **result}
                     if wellness.get("intervals_checks") or wellness.get("days_from_archive"):
                         record["wellness"] = wellness
-                    store.record_run("watch", record)
+                    store.record_run("watch", record, started=started)
                     print(json.dumps({"apply": args.apply, "watch": result, "wellness": wellness}, indent=2))
                     return 0
                 if args.cmd == "backfill":
-                    intervals = IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
+                    garmin_only = args.archive_only or (args.scope == "wellness" and args.wellness_files)
+                    intervals = (None if garmin_only else
+                                 IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id))
                     start = date.fromisoformat(args.start)
                     end = date.fromisoformat(args.end) if args.end else datetime.now(settings.timezone).date()
                     if start > end:

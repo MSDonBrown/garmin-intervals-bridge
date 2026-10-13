@@ -340,9 +340,11 @@ def test_env_file_fills_missing_variables_only(tmp_path, monkeypatch):
 
 
 def _clock(monkeypatch, calls=None, jump=0):
-    """A clock the loop's waits move on (at least `jump` seconds each), so the polls fall due."""
+    """A clock the loop's waits move on (at least `jump` seconds each), so the polls fall due.
+    The daily health probe comes due with it: a quiet fake, unless the test sets its own after."""
     from garmin_intervals_bridge import cli
     now = [1_800_000_000.0]
+    monkeypatch.setattr(cli, "probe", lambda *a, **k: {"findings": []})
 
     def sleep(seconds):
         if calls is not None:
@@ -385,16 +387,18 @@ def test_run_loop_does_a_full_run_then_polls(tmp_path, monkeypatch):
     _clock(monkeypatch, calls)
     st = Store(tmp_path)
     assert cli.run_loop(_loop_settings(tmp_path), st, apply=False, poll_seconds=60, sync_minutes=30, iterations=3) == 0
-    assert calls == ["sync", "wellness", ("sleep", 60), "watch", "check", ("sleep", 60), "watch", "check"]
+    assert calls == ["sync", "wellness", ("sleep", 1), "watch", "check", ("sleep", 60), "watch", "check"]
     assert [r["command"] for r in st.recent_runs(1)] == ["sync", "watch", "watch"]
     st.close()
 
 
 def test_run_loop_survives_a_block_and_other_errors(tmp_path, monkeypatch):
     from garmin_intervals_bridge import cli
+    calls = []
     outcomes = iter([GarminBlocked("429"), ValueError("boom"), {"seen": 0, "enriched": 0, "planned": 0}])
 
     def enrich(*a, **k):
+        calls.append("enrich")
         o = next(outcomes)
         if isinstance(o, Exception):
             raise o
@@ -403,11 +407,12 @@ def test_run_loop_survives_a_block_and_other_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "sync_wellness", lambda *a, **k: {"days_checked": 0, "writes": 0})
     monkeypatch.setattr(cli, "watch_once", lambda *a, **k: {"new": 0, "enriched": 0, "planned": 0})
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: {})
-    _clock(monkeypatch)
+    _clock(monkeypatch, jump=901)
     st = Store(tmp_path)
-    # iteration 1: block (pauses the full run), 2: poll, 3: poll ... the loop never dies
+    # 1: block (full runs pause 15 min), 2: a poll, 3: the error (a break), 4: a full run – it never dies
     assert cli.run_loop(_loop_settings(tmp_path), st, apply=False, poll_seconds=60, sync_minutes=30, iterations=4) == 0
-    assert [r["command"] for r in st.recent_runs(1)].count("watch") >= 2
+    assert calls == ["enrich", "enrich", "enrich"]       # the block, the error, then a full run that worked
+    assert [r["command"] for r in st.recent_runs(1)].count("watch") >= 1
     st.close()
 
 
@@ -609,7 +614,7 @@ def test_upload_mode_puts_the_gear_on_the_uploaded_originals_too(tmp_path, monke
     monkeypatch.setattr(cli, "sync_wellness", lambda *a, **k: {"days_checked": 0, "writes": 0})
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: {})
     monkeypatch.setattr(cli, "_gear_recent", lambda *a, **k: calls.append("gear") or {"checked": 1})
-    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    _clock(monkeypatch, jump=600)
     st = Store(tmp_path)
     cli.run_loop(_loop_settings(tmp_path), st, apply=True, poll_seconds=600, sync_minutes=30, iterations=2,
                  mode="upload")

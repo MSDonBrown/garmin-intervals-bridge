@@ -14,6 +14,7 @@ from .enrich import enrich_activity, load_field_mappings
 from .fit import sha256, validate_fit, wellness_bundle_index
 from .garmin import ESSENTIAL_ENDPOINTS, EXTRA_KEYS, GarminBlocked
 from .intake import intake_values, write_intake
+from .intervals import rate_limited, refused
 from .mapping import PROVISIONAL_CODES, map_wellness, merge_wellness, snapshot_corrections
 from .store import InstanceBusy, Store
 from .times import external_id_names, parse_utc
@@ -188,6 +189,8 @@ def _complete_intake(gid: str, activity: dict, intervals_id: str | None, garmin:
     except GarminBlocked:
         raise
     except Exception as exc:
+        if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+            raise
         log.warning("Intake of %s not written: %s; next run tries again", gid, _error_name(exc))
 
 
@@ -419,6 +422,10 @@ def sync_activities(settings: Settings, garmin: Any, intervals: Any, store: Stor
         except GarminBlocked:
             raise
         except Exception as exc:
+            if store.activity_status(gid) == "pending" and refused(exc):
+                store.record_activity(gid, "downloaded")    # Intervals refused it: nothing went in
+            if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+                raise
             if store.activity_status(gid) == "pending":
                 # The upload request itself failed after the pending lock was taken:
                 # its outcome is unknown, so it stays pending and is never retried blindly.
@@ -515,6 +522,8 @@ def sync_enrich(settings: Settings, garmin: Any, intervals: Any, store: Store, *
         except GarminBlocked:
             raise
         except Exception as exc:
+            if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+                raise
             attempts = store.record_failure(gid, f"{type(exc).__name__}: {exc}")
             metrics["failed"] += 1
             log.warning("Enrich %s failed with %s (attempt %d); retrying later", gid, _error_name(exc), attempts)
@@ -536,8 +545,38 @@ def sync_enrich(settings: Settings, garmin: Any, intervals: Any, store: Store, *
                      "ENRICHED" if outcome == "enriched" else "DRY-RUN would enrich",
                      gid, result["intervals_id"], fields, streams)
     if not date_range and not archive_only:
+        _retry_overdue(garmin, intervals, store, metrics, {str(a.get("activityId")) for a in activities},
+                       mappings, apply=apply)
         store.set_meta("activity_scan")
     return metrics
+
+
+RETRIES_BY_ID = 3               # per full run: failed activities that left the scan window
+
+
+def _retry_overdue(garmin: Any, intervals: Any, store: Store, metrics: dict, listed: set[str], mappings: Any, *,
+                   apply: bool) -> None:
+    """Failures whose retry is due but whose activity is older than the scan window: by their id
+    (else they would stay failed for good, and keep the scan from skipping)."""
+    now = time.time()
+    overdue = [f["garmin_id"] for f in store.failed_activities()
+               if f["garmin_id"] not in listed and (not f["next_retry"] or f["next_retry"] <= now)]
+    for gid in overdue[:RETRIES_BY_ID]:
+        try:
+            result = enrich_activity(gid, garmin, intervals, store, apply=apply, mappings=mappings)
+        except GarminBlocked:
+            raise
+        except Exception as exc:
+            if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+                raise
+            attempts = store.record_failure(gid, f"{type(exc).__name__}: {exc}")
+            metrics["failed"] += 1
+            log.warning("Retry of %s (outside the scan window) failed with %s (attempt %d)", gid, _error_name(exc),
+                        attempts)
+            continue
+        store.clear_failure(gid)
+        metrics[result["outcome"]] = metrics.get(result["outcome"], 0) + 1
+        log.info("Retried %s (outside the scan window): %s", gid, result["outcome"])
 
 
 def wellness_due(day: date, current: date, fetched: float | None, midnight: float,
@@ -660,6 +699,8 @@ def sync_wellness(settings: Settings, garmin: Any, intervals: Any, store: Store,
             unlocked = _write_wellness_day(day, _with_files(store, day, raw), current, settings, intervals, metrics,
                                            apply=apply, rewrite=rewrite)
         except Exception as exc:                         # one day's Intervals trouble must not end the run
+            if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+                raise
             metrics["failed"] += 1
             log.warning("Wellness %s not written: %s", day, _error_name(exc))
             continue
@@ -847,6 +888,8 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
                 if rewrite and unlocked:
                     store.set_meta(f"wellness:rewrite:{day}", "")
         except Exception as exc:                         # one day's Intervals trouble must not end the run
+            if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+                raise
             metrics["failed"] += 1
             log.warning("Wellness %s not written: %s; written from the archive next time", day, _error_name(exc))
 
@@ -926,6 +969,8 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
         except GarminBlocked:
             raise
         except Exception as exc:
+            if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+                raise
             metrics["failed"] += 1
             log.warning("Health Snapshot check of %s not done: %s; again at the next check", current,
                         _error_name(exc))
@@ -972,6 +1017,8 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
             try:
                 metrics[key] = feature.morning(settings, intervals, store, current, now, apply=apply)
             except Exception as exc:                     # never at the cost of the wellness run
+                if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+                    raise
                 log.warning("%s for %s failed: %s", key, current, _error_name(exc))
 
     if store.get_meta("wellness:pruned") != current.strftime("%Y-%m"):
@@ -996,6 +1043,8 @@ def _try_swap(settings: Any, gid: str, iid: str, garmin: Any, intervals: Any, st
         log.info("Swap of %s waits: another swap is running", gid)
         return iid
     except Exception as exc:
+        if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+            raise
         # nothing deleted; an upload already sent is recorded (pending/uploaded) and never sent twice
         log.warning("Swap of %s not done (%s); completing Garmin's copy instead", gid, _error_name(exc))
         return None
@@ -1059,6 +1108,8 @@ def watch_once(settings: Settings, garmin: Any, intervals: Any, store: Store, *,
         except GarminBlocked:
             raise
         except Exception as exc:
+            if rate_limited(exc) is not None:          # Intervals asked for a break: the whole run pauses
+                raise
             store.record_failure(external, f"{type(exc).__name__}: {exc}")
             metrics["failed"] += 1
             log.warning("Watch: enrich of %s failed with %s; the scheduled run will retry",

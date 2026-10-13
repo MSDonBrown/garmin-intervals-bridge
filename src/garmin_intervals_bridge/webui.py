@@ -226,7 +226,7 @@ class UI:
             now = time.time()
             runs = store.recent_runs(24 * 14)
             last = runs[-1]["started"] if runs else None
-            alive = self.in_run or (last is not None and now - last < 15 * 60)
+            alive = self.in_run or (last is not None and now - last < 35 * 60)     # the full run: every 30 min
             tokens = any(settings.token_dir.glob("*.json")) if settings.token_dir.is_dir() else False
             line = (f'<b class="ok">Running</b> &middot; last check {esc(_ago(last, now))}' if alive else
                     f'<b class="bad">Not running</b> &middot; last check {esc(_ago(last, now))}')
@@ -287,7 +287,8 @@ class UI:
 
     def _polls(self, session: Session, settings: Settings, store: Store, now: float) -> str:
         """When the bridge looks for new activities, why, and the button to look now."""
-        fast = polling.fast_seconds(settings, settings.mode)
+        mode = polling.ACTIVE.get("mode", settings.mode) if self.in_run else settings.mode
+        fast = polling.ACTIVE.get("fast") if self.in_run and polling.ACTIVE else polling.fast_seconds(settings, mode)
         plan = esc(polling.schedule_text(settings, store, now, fast))
         paused = float(store.get_meta(polling.PAUSE_KEY) or 0)
         if paused > now:
@@ -295,7 +296,7 @@ class UI:
                      '(Intervals.icu asked for a break, HTTP 429)')
         else:
             wanted, why = polling.interval(settings, store, now, fast)
-            last = store.last_run("watch")
+            last = polling.last_look(store, mode)
             if wanted is None:
                 state = f"now: {esc(why)}"
             else:
@@ -310,14 +311,18 @@ class UI:
         settings = self.settings()
         store = Store(settings.data_dir)
         try:
-            store.set_meta(polling.NOW_KEY, f"{time.time():.0f}")
+            store.set_meta(polling.NOW_KEY, f"{time.time():.3f}")
+            fast = polling.fast_seconds(settings, settings.mode)
+            keeps = polling.interval(settings, store, time.time(), fast)[0] is not None
         finally:
             store.close()
         polling.POLL_NOW.set()                          # a `run` in this process: at once
         when = "now" if self.in_run else "within a minute"
+        then = (" and keeps looking at its fastest pace for the next hour" if keeps else
+                " (once: outside BRIDGE_POLL_HOURS it does not keep looking)")
         return self.status(session, query, {}, f'<section><p class="ok">The bridge looks for new activities {when}'
-                                                ' and keeps looking at its fastest pace for the next hour. What it '
-                                                'found shows in the <a href="/log">log</a>.</p></section>')
+                                                f'{then}. What it found shows in the <a href="/log">log</a>.</p>'
+                                                '</section>')
 
     # -- Garmin --
 
@@ -543,7 +548,7 @@ class UI:
             text = form.get(field, "").strip().replace(",", ".")
             try:
                 value = round(float(text) * 60) if text else None
-            except ValueError:
+            except (ValueError, OverflowError):
                 return f'"{text}" is no number of minutes'
             if value is not None and not low * 60 <= value <= 24 * 3600:
                 return f"Looking every {text} minutes: between {low} and 1440, please"

@@ -36,6 +36,7 @@ from typing import Any
 
 from .enrich import garmin_id_from
 from .fit import extract_original_fit, sha256
+from .intervals import refused
 from .store import single_instance
 
 log = logging.getLogger(__name__)
@@ -172,8 +173,13 @@ def _swap(gid: str, iid: str, copy: dict, carry: dict, digest: str, plan: dict, 
         new_id = str(earlier)
     else:
         store.record_activity(gid, "pending", digest)      # an unknown outcome is never replayed
-        result = intervals.upload_fit(gid, path, name=copy.get("name"), description=copy.get("description"),
-                                      paired_event_id=copy.get("paired_event_id"))
+        try:
+            result = intervals.upload_fit(gid, path, name=copy.get("name"), description=copy.get("description"),
+                                          paired_event_id=copy.get("paired_event_id"))
+        except Exception as exc:
+            if refused(exc):
+                store.record_activity(gid, "downloaded", digest)    # refused: nothing went in
+            raise
         if not result.get("created"):
             store.record_activity(gid, "remote_exists", digest, iid)
             return {**plan, "outcome": "kept", "reason": "Intervals already has this file"}

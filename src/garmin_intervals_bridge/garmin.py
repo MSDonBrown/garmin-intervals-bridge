@@ -286,7 +286,7 @@ class GarminSource:
             if isinstance(result, list):
                 days = [str(x.get("startTimeLocal") or x.get("startTimeGMT") or "")[:10]
                         for x in result if isinstance(x, dict)]
-                if len(result) == 100 and days and min(days) > lo:
+                if len(result) == 100 and days and min(days) >= lo:      # the first day may hold more
                     result = self._call("get_activities_by_date", lo, hi)   # busier than 100 in 14 days
                 else:
                     result = [x for x in result if isinstance(x, dict)

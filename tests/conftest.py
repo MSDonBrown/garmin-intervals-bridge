@@ -29,3 +29,26 @@ def _isolated_process():
     for handler in [h for h in root.handlers if isinstance(h, RotatingFileHandler)]:
         root.removeHandler(handler)
         handler.close()
+
+
+LOCAL = ("127.0.0.1", "::1", "localhost")
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """No test talks to the internet: a forgotten fake would otherwise reach Intervals or Garmin."""
+    import socket
+    real_connect, real_lookup = socket.socket.connect, socket.getaddrinfo
+
+    def connect(self, address):
+        host = address[0] if isinstance(address, tuple) else None
+        if host is not None and host not in LOCAL:
+            raise OSError(f"tests must not connect to {host}")
+        return real_connect(self, address)
+
+    def lookup(host, *args, **kwargs):
+        if host not in LOCAL and host is not None:
+            raise OSError(f"tests must not look up {host}")
+        return real_lookup(host, *args, **kwargs)
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket, "getaddrinfo", lookup)

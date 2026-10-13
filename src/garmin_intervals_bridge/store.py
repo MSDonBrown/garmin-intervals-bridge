@@ -199,9 +199,9 @@ class Store:
             raise ValueError("Garmin activity ID must be numeric")
         return self.base / "fits" / f"{garmin_id}.fit"
 
-    def record_run(self, command: str, metrics: dict) -> None:
+    def record_run(self, command: str, metrics: dict, started: float | None = None) -> None:
         self.db.execute("INSERT INTO runs (command, started, metrics) VALUES (?,?,?)",
-                        (command, time.time(), json.dumps(metrics, default=str)))
+                        (command, started or time.time(), json.dumps(metrics, default=str)))
         self.db.execute("DELETE FROM runs WHERE started < ?", (time.time() - 30 * 86400,))
         self.db.commit()
 

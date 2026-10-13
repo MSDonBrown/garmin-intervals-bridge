@@ -1,10 +1,11 @@
 """Small, explicit Intervals.icu REST client based on published API schema."""
 from __future__ import annotations
 
+import email.utils
 import logging
 import re
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,12 +22,24 @@ RETRY_AFTER_CAP_SECONDS = 30
 WRITE_RETRIES = 3                  # a wellness PUT answered with 429 is sent again after the wait
 
 
-def _retry_after(response: Any, attempt: int) -> float:
+def _seconds(value: Any) -> float | None:
+    """A Retry-After header: seconds, or an HTTP date."""
     try:
-        value = float(response.headers.get("Retry-After"))
-    except (AttributeError, TypeError, ValueError):
-        value = 5.0 * 2 ** attempt
-    return max(1.0, min(value, RETRY_AFTER_CAP_SECONDS))
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(str(value))
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
+
+def _retry_after(response: Any, attempt: int) -> float:
+    value = _seconds(getattr(response, "headers", {}).get("Retry-After"))
+    return max(1.0, min(value if value is not None else 5.0 * 2 ** attempt, RETRY_AFTER_CAP_SECONDS))
 
 
 def rate_limited(exc: BaseException) -> float | None:
@@ -37,10 +50,14 @@ def rate_limited(exc: BaseException) -> float | None:
     response = getattr(exc, "response", None)
     if getattr(response, "status_code", None) != 429:
         return None
-    try:
-        return max(0.0, float(response.headers.get("Retry-After")))
-    except (AttributeError, TypeError, ValueError):
-        return 0.0
+    return _seconds(response.headers.get("Retry-After")) or 0.0
+
+
+def refused(exc: BaseException) -> bool:
+    """Intervals answered with a 4xx (a 429 included): it did not take the request – an upload
+    that failed this way created nothing and may be sent again later."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return isinstance(status, int) and 400 <= status < 500
 
 
 class _CappedRetry(Retry):
@@ -72,7 +89,8 @@ class IntervalsClient:
         self._custom_items: list[dict] | None = None     # one GET per process; writes invalidate it
         if session is None:
             # Only GET retries; never automatically replay a non-idempotent upload.
-            retries = _CappedRetry(total=3, backoff_factor=1, status_forcelist=[429, 502, 503, 504],
+            # no retry on 429: it goes up to the pause, with the Retry-After Intervals sent
+            retries = _CappedRetry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504],
                                    allowed_methods=frozenset(["GET"]), respect_retry_after_header=True)
             self.session.mount("https://", HTTPAdapter(max_retries=retries))
 

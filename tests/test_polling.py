@@ -1,6 +1,7 @@
 """When the bridge looks for new activities: its pace, quiet hours, the hour after an activity,
 "Check now", and the adaptive mode that learns the usual hours from the archive."""
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -196,7 +197,7 @@ def test_a_watch_that_is_not_due_ends_without_a_request(tmp_path, monkeypatch, c
     monkeypatch.setattr(cli, "watch_once", lambda *a, **k: looks.append("watch") or {"new": 0})
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: {})
     st = Store(tmp_path)
-    st.record_run("watch", {})                                               # just looked
+    st.record_run("watch", {}, started=time.time() - 60)                    # looked a minute ago
     assert main(["watch"]) == 0
     assert "every 5 min, the last" in json.loads(capsys.readouterr().out)["skipped"] and looks == []
     st.set_meta(polling.NOW_KEY, f"{st.last_run('watch') + 1:.0f}")         # "Check now"

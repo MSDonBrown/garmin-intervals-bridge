@@ -32,6 +32,7 @@ from typing import Any
 
 from . import alerts, notices
 from .autostart import platform
+from .config import within_hours
 from .mapping import map_wellness
 
 log = logging.getLogger(__name__)
@@ -100,6 +101,23 @@ def probe(settings: Any, garmin: Any, intervals: Any, store: Any, *, now: float 
     return report
 
 
+def _watch_stale_hours(settings: Any, now: float) -> float | None:
+    """How long without a look counts as "not running": at least STALE_RUN_HOURS, twice the
+    slowest planned pace; None while no look is expected (quiet hours without a quiet pace,
+    or too soon after they ended)."""
+    from .polling import QUIET_DEFAULT
+    slowest = max(getattr(settings, "poll_seconds", None) or 300, getattr(settings, "poll_quiet_seconds", None) or 0,
+                  QUIET_DEFAULT if getattr(settings, "poll_mode", "fixed") == "adaptive" else 0)
+    hours = max(STALE_RUN_HOURS, 2 * slowest / 3600)
+    ranges = getattr(settings, "poll_hours", ())
+    if ranges and getattr(settings, "poll_quiet_seconds", None) is None:
+        tz = getattr(settings, "timezone", None)
+        steps = int(hours * 4) + 1                    # every quarter of an hour back
+        if not all(within_hours(datetime.fromtimestamp(now - 900 * n, tz), ranges) for n in range(steps)):
+            return None
+    return hours
+
+
 def silent_error_checks(settings: Any, store: Any, *, now: float | None = None) -> list[dict]:
     now = now or time.time()
     findings: list[dict] = []
@@ -108,8 +126,10 @@ def silent_error_checks(settings: Any, store: Any, *, now: float | None = None) 
     every = getattr(settings, "backup_hours", 12)
     last = {c: max((r["started"] for r in store.recent_runs(24 * 14, c)), default=0) for c in ("backup", "sync")}
     backup_mode = last["backup"] > last["sync"]          # whichever ran last is the mode it runs in
+    watch_hours = _watch_stale_hours(settings, now)
     expected = ((("backup", "backup", 2 * every + 1),) if backup_mode else
-                (("watch", "watch for new activities", STALE_RUN_HOURS), ("sync", "30-minute sync", STALE_RUN_HOURS)))
+                ((("watch", "watch for new activities", watch_hours),) if watch_hours else ())
+                + (("sync", "30-minute sync", STALE_RUN_HOURS),))
     for command, label, hours in expected:
         runs = store.recent_runs(hours, command)
         if not runs and store.recent_runs(24 * 14, command):      # ran before, not any more

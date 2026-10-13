@@ -66,6 +66,34 @@ happened; all are closed:
   - A read with failed endpoints counts only once they came.
 - An empty FIT download is refused (before, it counted as the original and the activity as
   done for good), and the size limit holds for plain FIT downloads too.
+- **Kinder when something is wrong:**
+  - A full run that keeps failing (Intervals down, say) waits 5, 10, 20 … minutes before
+    the next try. Before, it started again every minute, and no poll came in between.
+  - When Intervals answers 429, the whole run pauses for as long as it asks, a date in
+    `Retry-After` included. Before, the 429 was sometimes booked against a single activity
+    or day, and the Intervals client retried after at most 30 seconds.
+  - There is no health probe during such a pause.
+  - An upload Intervals refused (4xx) is no longer left "pending" for good.
+- **Looking for new activities:**
+  - Upload mode counts the full run's look at Garmin and makes the hour after an upload
+    fast. Since this release's new polling, it had looked half as often again as before.
+  - `run` wakes when a look is due, so a 90-second pace means 90 seconds (it meant 120).
+  - *Check now* right after a look waits half a minute, so pressing it again and again
+    does not hammer Intervals. The status page shows the pace `run` actually uses, and
+    says when *Check now* looks only once (outside `BRIDGE_POLL_HOURS`).
+  - The pace is measured from the start of each look, not its end.
+  - Health no longer reports "watch not running" while `BRIDGE_POLL_HOURS` are closed. A
+    slow quiet pace stretches the limit. The status page counts the 30-minute full runs as
+    alive.
+- An activity whose retry falls after it left the 4-day scan window is retried by its id.
+  Before, it stayed failed for good and made the scan run every 30 minutes instead of every
+  2 hours.
+- Garmin's short activity list falls back to the full one when its 100th activity is on the
+  first day asked for, so that day's earlier ones are not missed.
+- `health` in backup mode, and `backfill --wellness-files` / `--archive-only`, no longer
+  ask for an Intervals key.
+- Tests can no longer reach the internet. A few of them had been sending dummy requests
+  to intervals.icu unnoticed.
 
 ## 0.10.3 — 2026-10-13
 
