@@ -6,19 +6,29 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # the guides promise Windows and the Mac too: the whole suite there as well (thanks @FrancescoCastaldi)
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ['3.12', '3.13']
+        include:
+          - os: windows-latest
+            python-version: '3.12'
+          - os: macos-latest
+            python-version: '3.12'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e '.[dev]'
+      - run: pip install -e ".[dev]"
       - run: ruff check src tests
+        if: runner.os == 'Linux'
       - run: pytest -q
       - run: pip-audit --progress-spinner off
+        if: runner.os == 'Linux'
   # The guides promise Windows and the Mac: install the package there and run what a first
   # command does (settings, time zone, data folder, locks), without network or a key.
   smoke:

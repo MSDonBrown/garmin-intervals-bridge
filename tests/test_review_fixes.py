@@ -1,5 +1,8 @@
 """Behaviour fixed after the 0.2.0 code review."""
-import fcntl
+try:
+    import fcntl
+except ImportError:                     # Windows: the bridge locks with msvcrt there
+    fcntl = None
 import time
 from datetime import date
 from types import SimpleNamespace
@@ -250,11 +253,24 @@ def test_duration_matches_moving_time_when_the_ride_was_paused():
     assert match_activity(garmin, [other]) is None
 
 
+@pytest.mark.skipif(fcntl is None, reason="Windows locks with msvcrt")
 def test_flock_is_what_single_instance_uses(tmp_path):
     with single_instance(tmp_path, ("wellness",)):
         lock = (tmp_path / ".bridge-wellness.lock").open("a+")
         with pytest.raises(BlockingIOError):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock.close()
+
+
+@pytest.mark.skipif(fcntl is not None, reason="POSIX locks with fcntl")
+def test_msvcrt_locking_is_what_single_instance_uses_on_windows(tmp_path):
+    # thanks @FrancescoCastaldi
+    import msvcrt
+    with single_instance(tmp_path, ("wellness",)):
+        lock = (tmp_path / ".bridge-wellness.lock").open("a+")
+        with pytest.raises(OSError):
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
         lock.close()
 
 

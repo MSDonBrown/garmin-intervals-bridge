@@ -2,9 +2,11 @@
 import json
 import os
 import re
+import sys
 import threading
 from pathlib import Path
 
+import pytest
 from test_webui import call, csrf, env  # noqa: F401  (the env fixture)
 
 from garmin_intervals_bridge import __version__, config, webui
@@ -120,6 +122,8 @@ def test_a_forged_ingress_path_is_not_echoed(env, monkeypatch):  # noqa: F811
 
 def _run_app(tmp_path, data, share):
     """home-assistant/run.sh with a stand-in bridge that records how it was started."""
+    if sys.platform == "win32":
+        pytest.skip("run.sh is the Linux container's start script")
     import subprocess
     stub = tmp_path / "bin"
     stub.mkdir(exist_ok=True)

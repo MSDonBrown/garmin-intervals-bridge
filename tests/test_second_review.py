@@ -1,6 +1,7 @@
 """The second review's findings on running the bridge: rate limits, failing full runs, the
 look-for-new-activities timing, health, retries outside the scan window."""
 
+import sys
 import time
 from datetime import date, datetime
 from types import SimpleNamespace
@@ -287,6 +288,7 @@ def test_poll_hours_are_read_strictly():
             poll_hours(wrong)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
 def test_a_rotated_log_stays_private(tmp_path, monkeypatch):
     import logging
     import os
