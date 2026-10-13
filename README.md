@@ -628,8 +628,9 @@ the page answers only Home Assistant's ingress).
 Read [SECURITY.md](SECURITY.md) and [PRIVACY.md](PRIVACY.md). In short: no passwords stored,
 tokens and the API key readable by the service user only, the data
 directory is personal (routes, health data) and must never be committed or
-shared, dry run by default, no deletions ever. The bridge talks to Garmin
-Connect, Intervals.icu and, once a day for the update hint, pypi.org – nothing else.
+shared, dry run by default, no deletions – except Garmin's filtered copy in Intervals when you
+switch swap mode on. The bridge talks to Garmin Connect, Intervals.icu, once a day pypi.org for
+the update hint, and the mail or ntfy server you set up for alerts – nothing else.
 
 ## Legal note
 

@@ -121,7 +121,9 @@ The second line restarts the background bridge with the new version.
   the web page (`ui`) → *Actions → One activity again*.
 - *"429"* or *"too many requests"* at the Garmin sign-in: Garmin limits
   sign-ins; wait an hour and run `setup` again.
-- Nothing is deleted on either side, so a mistake is at most a missing value.
+- Nothing is deleted on either side, so a mistake is at most a missing value – unless you
+  switch swap mode on: then Garmin's filtered copy of each new activity in Intervals is
+  replaced by your original (never one with comments; nothing on Garmin Connect).
 - Questions and reports: <https://github.com/futureweb/garmin-intervals-bridge/issues>.
 
 ## Set up with an earlier version of this guide?

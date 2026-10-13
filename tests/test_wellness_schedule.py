@@ -143,6 +143,9 @@ def test_the_check_is_throttled_when_called_every_minute(tmp_path):
     for minute in range(0, 10):
         run(tmp_path, st, g, i, at(6, minute), throttle=True)
     assert len(i.gets) == 1 and g.reads == []
+    for minute in range(10, 30):                                # ... and asks again every ten minutes
+        run(tmp_path, st, g, i, at(6, minute), throttle=True)
+    assert len(i.gets) == 3
     st.close()
 
 

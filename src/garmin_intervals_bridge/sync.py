@@ -864,10 +864,10 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
     if (morning and not watching and not pending_past and not readiness_due and not unwritten and not files_due
             and not advice_due):
         return metrics
-    if throttle and not unwritten and not files_due and (last := store.meta_updated("wellness:check")) \
-            and now_ts - last < CHECK_MINUTES * 60 - 5:
+    last = float(store.get_meta("wellness:check") or 0)        # the time of the last check, as the caller has it
+    if throttle and not unwritten and not files_due and last and 0 <= now_ts - last < CHECK_MINUTES * 60 - 5:
         return metrics
-    store.set_meta("wellness:check")
+    store.set_meta("wellness:check", f"{now_ts:.0f}")
 
     def read(day: date, endpoints: tuple[str, ...] | None) -> dict:
         fresh = garmin.snapshot(day, **({"endpoints": endpoints} if endpoints else {}))

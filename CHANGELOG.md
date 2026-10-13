@@ -127,9 +127,22 @@ happened; all are closed:
     recording's.
   - Streams are not written when nothing can check their alignment and the original starts
     at another second than Intervals' copy.
+- The web page asks pypi.org for a new version once a day, as documented (it was every six
+  hours while the page was open). The morning wellness check's ten-minute spacing is
+  measured on the bridge's own clock.
 - Home Assistant app: taking over a copied data folder keeps the app's own form settings,
   whatever the folder brought along. The empty database of an earlier start is set aside
   (`bridge.db.before-takeover`) instead of deleted.
+
+### Documentation
+
+- PRIVACY.md says what an alert carries: push messages carry a headline, e-mails the details
+  too. It says what the bridge deletes (swap mode only), and no longer describes webhooks,
+  which are not built. README and the Windows/Mac guides no longer promise "no deletions"
+  without naming swap mode.
+- The field mapping guide explains which existing values are replaced, which stream scripts
+  count, and the limit of the Health Snapshot correction: a second HRV or resting-HR source
+  whose value equals a snapshot's is put back to the night's too.
 
 ## 0.10.3 — 2026-10-13
 

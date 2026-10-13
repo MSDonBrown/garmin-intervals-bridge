@@ -133,7 +133,10 @@ Intervals (no Garmin request), and when it moves away from the night's, it
 reads today's files once to see whether a snapshot explains it. Untick SpO2
 in Intervals' Garmin wellness settings: the official integration only ever
 delivers it from snapshots, the bridge brings the overnight average. Resting
-HR and HRV can stay ticked, they bring the night's values early.
+HR and HRV can stay ticked, they bring the night's values early. The bridge
+tells a snapshot's value by its number: with a second HRV or resting-HR source
+(another app, a value typed in) that happens to equal a snapshot's, that value
+is replaced by the night's too.
 
 ## Notes on enrich mode
 

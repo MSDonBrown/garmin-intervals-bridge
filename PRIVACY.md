@@ -13,12 +13,14 @@ folder, log), readable by you – or by the bridge's own service user – only.
 
 **Where it sends it:** to Garmin Connect and Intervals.icu, to read and write your own
 data there. Besides that, only when you set them up: your own mail server and/or an ntfy
-server for alerts (a headline, no details), and once a day pypi.org to look for a newer
-version (no personal data; `BRIDGE_UPDATE_CHECK=false` turns it off). No analytics, no
-telemetry, no third parties.
+server for alerts – a push message carries a headline only; an e-mail also the details
+(which activity or day, the error) – and once a day pypi.org to look for a newer version
+(no personal data; `BRIDGE_UPDATE_CHECK=false` turns it off). No analytics, no telemetry,
+no third parties.
 
-**Webhooks** (optional, own server only): Intervals.icu tells the bridge that an activity
-arrived – its id and source – so it can act at once instead of asking every few minutes.
+**What it deletes:** nothing – except, when you switch swap mode on, Garmin's filtered copy
+of a new activity in Intervals, once your original is in its place (never one with
+comments; nothing on Garmin Connect).
 
 **Removing it:** stop the bridge and delete its folder; revoke its access in
 Intervals.icu (*Settings → Developer Settings*, or the connected app) and, if you like,

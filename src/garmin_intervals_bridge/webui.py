@@ -182,9 +182,9 @@ class UI:
         return session
 
     def update_available(self) -> str | None:
-        """PyPI at most every six hours, and only when the update check is on."""
+        """PyPI at most once a day, and only when the update check is on."""
         checked, latest = self._update
-        if time.time() - checked > 6 * 3600:
+        if time.time() - checked > 24 * 3600:
             try:
                 latest = self.newer_release() if self.settings().update_check else None
             except Exception:
