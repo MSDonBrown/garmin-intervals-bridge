@@ -34,10 +34,20 @@ configuration:
     description: Empty = Home Assistant's. Region/City, e.g. Europe/London.
   poll_hours:
     name: Poll hours
-    description: Look for new activities only then, e.g. 6-22 (empty = always).
+    description: Look for new activities only then, e.g. 6-22 (empty = always); outside them not at all, or at the quiet interval.
   poll_seconds:
     name: Poll interval
-    description: Seconds between the checks for new activities (default 300).
+    description: Seconds between the checks for new activities (default 300) – the fastest pace, adaptive or not.
+  poll_quiet_seconds:
+    name: Quiet interval
+    description: >-
+      Outside the poll hours check this often instead of not at all, and at unusual times in the adaptive
+      mode (there 1800 by default). For an hour after a new activity: the poll interval again.
+  poll_mode:
+    name: Adaptive polling (beta)
+    description: >-
+      adaptive – learn from the archive when your activities usually end and check at the poll interval only
+      then, less often otherwise: fewer requests for Intervals.icu. fixed – always the poll interval.
   backup_hours:
     name: Backup interval
     description: Backup mode – hours between runs (default 12).

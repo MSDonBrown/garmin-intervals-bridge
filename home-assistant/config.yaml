@@ -37,6 +37,8 @@ schema:
   timezone: str?
   poll_hours: str?
   poll_seconds: int(30,3600)?
+  poll_quiet_seconds: int(60,86400)?
+  poll_mode: list(fixed|adaptive)?
   backup_hours: int(1,168)?
   alert_email: email?
   smtp_password: password?

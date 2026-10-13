@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+Fewer requests for Intervals.icu, and a button to look now.
+
+Upgrading needs no change. systemd users: the `watch` command now decides itself when a look
+is due, so the shipped watch timer starts it every minute again (copy it to take that over).
+To keep looking every minute: `BRIDGE_POLL_SECONDS=60`.
+
+### Added
+
+- **A slower pace instead of none in quiet hours:** `BRIDGE_POLL_QUIET_SECONDS` – outside
+  `BRIDGE_POLL_HOURS` the bridge looks this often instead of not at all (unset: not at all,
+  as before). For an hour after a new activity it looks at the full pace again: a second
+  session or the cool-down may follow.
+- **Adaptive polling (beta):** `BRIDGE_POLL_MODE=adaptive` learns from the archive when your
+  activities usually end – per weekday and hour, the last twelve weeks, recent weeks counting
+  most – and looks at the full pace only then, every few minutes around those hours, every
+  30 minutes at unusual times. It never looks faster than `BRIDGE_POLL_SECONDS` and never
+  outside `BRIDGE_POLL_HOURS`; with fewer than 15 activities in the archive it keeps the full
+  pace. Its aim: as few requests for Intervals.icu as possible without making you wait.
+  Feedback welcome.
+- **Check now** on the web page: looks at once, and at the full pace for the hour after.
+- The web page shows when the bridge looks and why; its settings page sets the pace, the
+  hours, the quiet pace and the adaptive mode. Home Assistant app and Unraid template: the
+  new options.
+
+### Changed
+
+- `watch` (the systemd timer's command) keeps to `BRIDGE_POLL_SECONDS` like `run` does,
+  5 minutes by default; a `watch` that is not due ends at once, without a request.
+
 ## 0.10.3 — 2026-10-13
 
 The Home Assistant app's first real install, fixed.

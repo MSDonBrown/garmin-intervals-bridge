@@ -30,7 +30,7 @@ data it already has – and carries on without a new Garmin sign-in.
 
 ## The web page
 
-In the sidebar: what the bridge did, the Garmin sign-in, gear and chart plans with a button
+In the sidebar: what the bridge did, *Check now* for new activities, the Garmin sign-in, gear and chart plans with a button
 to carry them out, one activity again after Intervals' *Reprocess file*, today's training
 advice, the log. Home Assistant signs you in; nothing else can reach the page.
 
@@ -42,7 +42,8 @@ advice, the log. Home Assistant signs you in; nothing else can reach the page.
 | Write to Intervals | off = dry run |
 | Swap Garmin's copy for the original | replaces the filtered copy in Intervals with your original file – "Reprocess file" then keeps everything; deletes that copy in Intervals (never one with comments), nothing on Garmin Connect |
 | ImReady4 / HRV trend advice | the morning training advice into your wellness fields |
-| Poll hours / interval | look for new activities less often, or only during the day |
+| Poll hours / interval / quiet interval | look for new activities less often, only during the day, or slower at night |
+| Adaptive polling (beta) | learns when your activities usually end and checks often only then – fewer requests for Intervals.icu |
 | Alert e-mail / Push messages (ntfy) | when Garmin wants a new sign-in or something has been failing for a day |
 | Time zone | empty = Home Assistant's |
 

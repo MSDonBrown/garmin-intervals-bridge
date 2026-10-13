@@ -1,9 +1,9 @@
 [Unit]
-Description=Poll Intervals.icu every 5 minutes for newly imported Garmin activities
+Description=Look for newly imported Garmin activities when due (BRIDGE_POLL_SECONDS, default every 5 minutes)
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=5min
+OnUnitActiveSec=1min
 RandomizedDelaySec=10s
 AccuracySec=10s
 

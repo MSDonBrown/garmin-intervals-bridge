@@ -311,3 +311,40 @@ def test_one_activity_again_shows_what_it_gets_then_writes(page, env, monkeypatc
     assert calls[-1] == ("42", "i42", True, True, True) and "written" in text
     assert "Choose the activity first" in call(page, "POST", "/actions/enrich-apply", {"csrf": token},
                                                cookie=cookie)[2]
+
+
+def test_check_now_on_the_status_page(page, env):
+    from garmin_intervals_bridge import polling
+    cookie = signed_in(page)
+    text = call(page, "GET", "/", cookie=cookie)[2]
+    assert "New activities" in text and "every 5 min" in text and "Check now" in text
+    polling.POLL_NOW.clear()
+    text = call(page, "POST", "/poll-now", {"csrf": csrf(text)}, cookie=cookie)[2]
+    assert "looks for new activities within a minute" in text and polling.POLL_NOW.is_set()
+    polling.POLL_NOW.clear()
+    st = Store(config.Settings.from_env().data_dir)
+    assert polling.due(config.Settings.from_env(), st, float(st.get_meta(polling.NOW_KEY)), 300) == (
+        True, "asked on the web page")
+    st.close()
+
+
+def test_when_to_look_is_set_on_the_settings_page(page, env):
+    cookie = signed_in(page)
+    text = call(page, "GET", "/settings", cookie=cookie)[2]
+    assert "Looking for new activities" in text and "Beta: learn when my activities usually end" in text
+    form = {"csrf": csrf(text), "timezone": "Europe/Vienna"}
+    for wrong, says in (({"poll_hours": "7-"}, "is no range"), ({"poll_minutes": "soon"}, "is no number"),
+                        ({"poll_minutes": "2", "poll_quiet_minutes": "1"}, "only look less often"),
+                        ({"poll_minutes": "0.2"}, "between 1 and 1440")):
+        text = call(page, "POST", "/settings", {**form, **wrong}, cookie=cookie)[2]
+        assert says in text and "nothing was changed" in text
+    assert "BRIDGE_POLL" not in env.read_text()
+    text = call(page, "POST", "/settings", {**form, "poll_minutes": "1", "poll_hours": "7-23",
+                                            "poll_quiet_minutes": "30", "poll_adaptive": "1"}, cookie=cookie)[2]
+    assert "Saved" in text
+    values = config.parse_env_file(env)
+    assert (values["BRIDGE_POLL_SECONDS"], values["BRIDGE_POLL_HOURS"], values["BRIDGE_POLL_QUIET_SECONDS"],
+            values["BRIDGE_POLL_MODE"]) == ("60", "7-23", "1800", "adaptive")
+    text = call(page, "GET", "/settings", cookie=cookie)[2]
+    assert 'name="poll_minutes" value="1"' in text and 'name="poll_quiet_minutes" value="30"' in text
+    assert 'name="poll_hours" value="7-23"' in text and 'name="poll_adaptive" value="1" checked' in text

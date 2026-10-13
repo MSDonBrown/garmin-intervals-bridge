@@ -109,6 +109,7 @@ def within_hours(when: Any, ranges: tuple[tuple[int, int], ...]) -> bool:
 
 
 MODES = ("enrich", "upload", "backup")
+POLL_MODES = ("fixed", "adaptive")
 
 
 def _mode() -> str:
@@ -116,6 +117,14 @@ def _mode() -> str:
     mode = os.getenv("BRIDGE_MODE", "").strip().lower() or "enrich"
     if mode not in MODES:
         raise ValueError(f"BRIDGE_MODE must be one of {', '.join(MODES)}")
+    return mode
+
+
+def _poll_mode() -> str:
+    """BRIDGE_POLL_MODE: fixed (default) or adaptive – fast only when your activities usually end."""
+    mode = os.getenv("BRIDGE_POLL_MODE", "").strip().lower() or "fixed"
+    if mode not in POLL_MODES:
+        raise ValueError(f"BRIDGE_POLL_MODE must be one of {', '.join(POLL_MODES)}")
     return mode
 
 
@@ -139,7 +148,8 @@ OPTIONS = {"intervals_api_key": "INTERVALS_API_KEY", "timezone": "BRIDGE_TIMEZON
            "ui_password": "BRIDGE_UI_PASSWORD", "alert_email": "BRIDGE_ALERT_EMAIL",
            "smtp_password": "BRIDGE_SMTP_PASSWORD", "ntfy_url": "BRIDGE_NTFY_URL", "mode": "BRIDGE_MODE",
            "swap": "BRIDGE_SWAP", "poll_hours": "BRIDGE_POLL_HOURS", "poll_seconds": "BRIDGE_POLL_SECONDS",
-           "backup_hours": "BRIDGE_BACKUP_HOURS"}
+           "backup_hours": "BRIDGE_BACKUP_HOURS", "poll_quiet_seconds": "BRIDGE_POLL_QUIET_SECONDS",
+           "poll_mode": "BRIDGE_POLL_MODE"}
 
 
 def load_options_file(path: Path | None = None) -> list[str]:
@@ -243,6 +253,8 @@ class Settings:
     swap_hours: int = 48
     poll_seconds: int | None = None
     poll_hours: tuple = ()
+    poll_quiet_seconds: int | None = None
+    poll_mode: str = "fixed"
     mode: str = "enrich"
     backup_hours: int = 12
 
@@ -297,6 +309,9 @@ class Settings:
             ntfy_token=_text("BRIDGE_NTFY_TOKEN"),
             poll_seconds=_positive_int("BRIDGE_POLL_SECONDS", 60, 24 * 3600) if _text("BRIDGE_POLL_SECONDS") else None,
             poll_hours=poll_hours(os.getenv("BRIDGE_POLL_HOURS", "")),
+            poll_quiet_seconds=(_positive_int("BRIDGE_POLL_QUIET_SECONDS", 60, 24 * 3600)
+                                if _text("BRIDGE_POLL_QUIET_SECONDS") else None),
+            poll_mode=_poll_mode(),
             mode=_mode(),
             backup_hours=_positive_int("BRIDGE_BACKUP_HOURS", 12, 168),
             swap=_flag("BRIDGE_SWAP"),

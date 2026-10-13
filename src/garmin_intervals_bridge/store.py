@@ -201,6 +201,10 @@ class Store:
                                (time.time() - hours * 3600,) + ((command,) if command else ()))
         return [{"command": r[0], "started": r[1], "metrics": json.loads(r[2])} for r in rows]
 
+    def last_run(self, command: str) -> float | None:
+        row = self.db.execute("SELECT MAX(started) FROM runs WHERE command=?", (command,)).fetchone()
+        return float(row[0]) if row and row[0] is not None else None
+
     def set_meta(self, key: str, value: str = "") -> None:
         self.db.execute("INSERT INTO meta VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
                         "updated=excluded.updated", (key, value, time.time()))
@@ -233,6 +237,11 @@ class Store:
         """The source an Intervals activity had when the watch last saw it; None if never seen."""
         row = self.db.execute("SELECT source FROM intervals_seen WHERE intervals_id=?", (intervals_id,)).fetchone()
         return None if row is None else str(row[0] or "")
+
+    def last_new_activity(self) -> float | None:
+        """When the watch last saw an activity for the first time."""
+        row = self.db.execute("SELECT MAX(first_seen) FROM intervals_seen").fetchone()
+        return float(row[0]) if row and row[0] is not None else None
 
     def mark_intervals_seen(self, intervals_id: str, external_id: str | None, source: str | None) -> None:
         """Remember an activity (or its new source and external id); when it was first seen stays."""

@@ -11,11 +11,11 @@ from contextlib import ExitStack
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import __version__, alerts, autostart, hrvtrend, imready4, notices, webui, wizard
+from . import __version__, alerts, autostart, hrvtrend, imready4, notices, polling, webui, wizard
 from .backup import backup_once, backup_range
 from .backup import describe as describe_backup
 from .charts import setup_charts
-from .config import Settings, configured_log_file, within_hours
+from .config import Settings, configured_log_file
 from .enrich import enrich_activity, gap_report, intervals_id_from, match_activity, resolve_one
 from .fit import compare_fit, extract_original_fit, sha256
 from .garmin import DAY_ENDPOINTS, GarminBlocked, GarminLoginNeeded, GarminSource, parse_endpoints
@@ -235,6 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 ACTIVITY_SCAN_MINUTES = 120     # run loop, enrich mode: the poll catches new activities in between
+TICK_SECONDS = 60               # run loop: how often it asks whether a poll is due
 
 
 def _gear_recent(settings: Settings, store: Store, intervals: IntervalsClient, *, apply: bool) -> dict:
@@ -250,9 +251,10 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
              iterations: int | None = None, mode: str = "enrich") -> int:
     """What the three systemd timers do, in one long-running process.
 
-    A fresh Garmin session per full run (like the timer), the cheap poll in between,
-    a health probe once a day written to the log. A Garmin block pauses everything
-    for 15 minutes; any other error is logged and the loop goes on.
+    A fresh Garmin session per full run (like the timer), the cheap poll in between –
+    every `poll_seconds`, or as quiet hours and the adaptive mode say (polling.py) – and
+    a health probe once a day written to the log. A Garmin block pauses everything for
+    15 minutes; any other error is logged and the loop goes on.
 
     Upload mode (official import off): the poll asks Garmin for new activities and
     uploads their originals; the full run does the same plus wellness.
@@ -261,8 +263,12 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
     intervals = IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
     garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
     next_sync, next_health, count = 0.0, time.time() + 300, 0
-    log.info("garmin-intervals-bridge %s running (%s mode): poll every %ds, full run every %d min, %s", __version__,
-             mode, poll_seconds, sync_minutes, "writing to Intervals" if apply else "DRY RUN (add --apply to write)")
+    tick = min(TICK_SECONDS, poll_seconds)
+    # only a web page in this process can wake the loop ("Check now"); one elsewhere waits for the tick
+    waker = polling.POLL_NOW if getattr(settings, "ui_port", None) else None
+    log.info("garmin-intervals-bridge %s running (%s mode): polls %s; full run every %d min, %s", __version__,
+             mode, polling.schedule_text(settings, store, time.time(), poll_seconds), sync_minutes,
+             "writing to Intervals" if apply else "DRY RUN (add --apply to write)")
     source = getattr(settings, "timezone_source", "BRIDGE_TIMEZONE")
     (log.warning if source.startswith("fallback") else log.info)(
         "Day boundary: %s (%s)%s", settings.timezone.key, source,
@@ -304,8 +310,8 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 log.info("Full run: %d activities seen, %d %s; wellness %d days checked, %d written; "
                          "%d Garmin requests", a["seen"], done, label, w["days_checked"], w["writes"], garmin.requests)
                 next_sync = now + sync_minutes * 60
-            elif not within_hours(datetime.now(settings.timezone), getattr(settings, "poll_hours", ())):
-                pass                                    # outside BRIDGE_POLL_HOURS: no poll; full runs go on
+            elif not polling.due(settings, store, now, poll_seconds)[0]:
+                pass                                    # quiet hours, or not yet: the full runs go on
             elif mode == "upload":
                 garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
                 result = sync_activities(settings, garmin, intervals, store, apply=apply, allow_upload=True,
@@ -353,7 +359,11 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
             else:
                 log.error("%s: %s", type(exc).__name__, exc)
         if iterations is None or count < iterations:
-            time.sleep(poll_seconds)
+            if waker is not None:
+                waker.wait(tick)
+                waker.clear()
+            else:
+                time.sleep(tick)
     return 0
 
 
@@ -398,7 +408,7 @@ def run_backup_loop(settings: Settings, store: Store, *, every_minutes: int, ite
     return 0
 
 
-PAUSE_KEY = "intervals:paused_until"
+PAUSE_KEY = polling.PAUSE_KEY
 RATE_LIMIT_PAUSE_SECONDS = 900
 
 
@@ -744,9 +754,12 @@ def main(argv: list[str] | None = None) -> int:
                     print(json.dumps({"apply": getattr(args, "apply", False),
                                       "skipped": "Intervals asked for a pause (HTTP 429)"}))
                     return 0
-                if args.cmd == "watch" and not within_hours(datetime.now(settings.timezone), settings.poll_hours):
-                    print(json.dumps({"apply": args.apply, "skipped": "outside BRIDGE_POLL_HOURS"}))
-                    return 0
+                if args.cmd == "watch":
+                    # the timer starts it every minute; when to look is decided here
+                    due, why = polling.due(settings, store, time.time(), polling.fast_seconds(settings))
+                    if not due:
+                        print(json.dumps({"apply": args.apply, "skipped": why}))
+                        return 0
                 if args.cmd == "watch":
                     intervals = IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
                     result: dict = {}

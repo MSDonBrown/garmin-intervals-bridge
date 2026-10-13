@@ -27,7 +27,7 @@ sudo -u gib env HOME=/var/lib/garmin-intervals-bridge BRIDGE_DATA_DIR=/var/lib/g
 cp deploy/systemd/garmin-intervals-bridge*.{service,timer} /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now garmin-intervals-bridge.timer          # full run every 30 min (safety net)
-systemctl enable --now garmin-intervals-bridge-watch.timer    # a poll every 5 minutes, Garmin only on new activities
+systemctl enable --now garmin-intervals-bridge-watch.timer    # looks for new activities when due, Garmin only on new ones
 systemctl start garmin-intervals-bridge.service     # first run now
 journalctl -u garmin-intervals-bridge.service -o cat
 ```
@@ -37,9 +37,11 @@ Read a few journals first: every run prints what it would write, per activity.
 
 ## Two timers, one purpose
 
-- `garmin-intervals-bridge-watch` runs every 5 minutes, asks Intervals for the
-  last three days (one ~450-byte request) and enriches only activities it sees
-  for the first time. Latency after the official import: about a minute. Every
+- `garmin-intervals-bridge-watch` starts every minute and looks when a look is
+  due – every 5 minutes by default (`BRIDGE_POLL_SECONDS`), or as quiet hours and
+  the adaptive mode say (README: *How often it looks*); otherwise it ends at once,
+  without a request. A look asks Intervals for the last three days (one
+  ~450-byte request) and enriches only activities it sees for the first time. Every
   ten minutes it also looks at today's wellness record in Intervals and reads
   last night's values from Garmin once the official sync has delivered the
   sleep (see *Wellness* in the main README).

@@ -52,7 +52,7 @@ This bridge is a small self-hosted service that:
 - adds exactly **what Garmin stripped**, into the custom fields and streams *you* have configured (Stamina curve, Recovery Time, VO₂max, Performance Condition, Sweat Loss, Training Effect …);
 - fills the **daily wellness values the official sync does not deliver**: night SpO₂, respiration, sleeping heart rate, Body Battery, HRV details, sleep stages, stress, readiness, floors, scale data — and your **logged nutrition** (kcal, carbs, protein, fat);
 - can **backfill the past** (on the reference account SpO₂ had silently stopped arriving in mid-2025);
-- reacts within minutes of the official import (it asks Intervals every 5 minutes), with Garmin contacted only when there is something new.
+- reacts within minutes of the official import (it asks Intervals every 5 minutes – or, [adaptive](#how-often-it-looks), mostly around the hours you usually finish an activity), with Garmin contacted only when there is something new.
 
 Everything is a dry run until you say `--apply`. Values that exist are never
 overwritten unless they demonstrably came from a filtered file.
@@ -180,7 +180,7 @@ run is exactly what `--apply` would send.
 | `gear [--prefer intervals\|evidence\|garmin] [--map G=I] [--create] [--apply]` | Put Garmin's gear (bikes, shoes, skis …) on the Intervals activities, from the archive; see [Gear](#gear). |
 | `imready4 [--date D \| --from D [--to D]] [--compare] [--apply] [--overwrite]` | ImReady4-compatible training advice into `TrainingAdvice`: preview, comparison with existing values, filling the past; see [Training advice](#training-advice-imready4). |
 | `hrvtrend [--date D \| --from D [--to D]] [--compare] [--apply] [--overwrite]` | Experimental trend advice into its own field `HRVTrendAdvice`, compared with ImReady4's; see [docs/HRV_TREND.md](docs/HRV_TREND.md). |
-| `run [--apply] [--mode …] [--poll-seconds N] [--sync-minutes N]` | Keep running in one process: a poll every 5 minutes, a full run every 30 minutes, the daily health check (what autostart, the containers and the Home Assistant app start). See [Running it](#running-it). |
+| `run [--apply] [--mode …] [--poll-seconds N] [--sync-minutes N]` | Keep running in one process: a poll every 5 minutes (see [How often it looks](#how-often-it-looks)), a full run every 30 minutes, the daily health check (what autostart, the containers and the Home Assistant app start). See [Running it](#running-it). |
 | `status` | Pending uploads and failed activities with their retry time. |
 | `reset-pending --activity-id <garmin id>` | Upload mode: clear a pending upload after you checked Intervals by hand. |
 | `snapshot-account [--history-from DATE]` | Archive what is not a time series: profile, settings, devices, zones, gear, records, badges, workouts, plans, the calendar. |
@@ -399,7 +399,7 @@ Claude Desktop: open `futureweb-intervals-mcp-1.0.0b1.mcpb` from the
 ## Running it
 
 **systemd (recommended, no container):** an unprivileged service user, a
-five-minute `watch` timer and a 30-minute full run, secrets in an
+`watch` timer (it starts every minute and looks when due, every 5 minutes by default) and a 30-minute full run, secrets in an
 `EnvironmentFile`, hardened units. See [deploy/README.md](deploy/README.md).
 
 **Windows, macOS or any PC without systemd:** `pip install garmin-intervals-bridge`
@@ -486,8 +486,9 @@ every 5 minutes and `... sync --apply` every 30 minutes instead.
 
 `garmin-intervals-bridge ui` opens a page in your browser: whether the bridge runs and
 what it did last, the Garmin sign-in (MFA included – the way to renew an expired session
-without a terminal), the settings (the API key can be replaced, never shown), the gear
-and chart plans with a button to carry them out, today's training advice, the log. It
+without a terminal), the settings (the API key can be replaced, never shown), when it looks
+for new activities with a *Check now* button, the gear and chart plans with a button to carry
+them out, today's training advice, the log. It
 listens on 127.0.0.1 only, and the link it opens carries a random key, so neither other
 users of the computer nor web pages in your browser can use it.
 
@@ -497,6 +498,29 @@ for that password. It is plain http: keep it in your home network or put it behi
 NAS's HTTPS reverse proxy. Every form carries a per-session token, a page on 127.0.0.1
 answers only to its own host name, and nothing is written to Intervals or Garmin without
 a button that says so. Standard library only, no JavaScript.
+
+### How often it looks
+
+Each look for new activities is one small request to Intervals.icu (in upload mode three to
+Garmin). By default the bridge looks every 5 minutes, day and night. Intervals.icu serves a
+lot of athletes on its own servers; fewer requests are kinder to it:
+
+- `BRIDGE_POLL_HOURS=7-23`: look only in these hours, not at all outside them …
+- `BRIDGE_POLL_QUIET_SECONDS=1800`: … or every 30 minutes outside them instead. Then, for an
+  hour after a new activity, it looks at the full pace again – a second session or the
+  cool-down may follow.
+- `BRIDGE_POLL_MODE=adaptive` (**beta**): the bridge learns from its own archive when your
+  activities usually end – per weekday and hour, the last twelve weeks, recent weeks counting
+  most – and looks at the full pace (`BRIDGE_POLL_SECONDS`) only then, every few minutes
+  around those hours, and every 30 minutes (`BRIDGE_POLL_QUIET_SECONDS`) at times you hardly
+  ever finish one. It never looks faster than `BRIDGE_POLL_SECONDS`, and never outside
+  `BRIDGE_POLL_HOURS` unless a quiet pace is set. It needs 15 activities in the archive; until
+  then it keeps the full pace. What it learned is in the log and on the web page; feedback is
+  welcome in the [forum thread](https://forum.intervals.icu/t/132863).
+- *Check now* on the web page looks at once, and at the full pace for the hour after.
+
+The full runs every 30 minutes go on regardless, and they read Garmin's activity list every
+two hours: nothing is missed, a slower pace only means an activity may arrive later.
 
 ### When the bridge needs you
 
@@ -549,8 +573,10 @@ win. Relative paths in a settings file count from its folder.
 | `BRIDGE_NTFY_URL`, `BRIDGE_NTFY_TOKEN` | | Alerts as push messages (ntfy topic URL; a token for a protected server) |
 | `BRIDGE_BACKUP_HOURS` | `12` | Backup mode: hours between runs (1–168); a day's wellness is taken once it is final either way |
 | `BRIDGE_MODE` | `enrich` | What `run` does without `--mode`: `enrich`, `upload` or `backup` (Garmin only, no Intervals) |
-| `BRIDGE_POLL_SECONDS` | `300` (upload mode `600`) | Seconds between the polls of `run` (`--poll-seconds` wins) |
-| `BRIDGE_POLL_HOURS` | always | Poll only in these hours, e.g. `10-18` or `6-9,16-22` (`22-6` runs over midnight). Outside them `run` skips its polls and `watch` does nothing; the half-hourly full runs go on, so an activity still arrives (within about two hours) and so does last night's wellness |
+| `BRIDGE_POLL_SECONDS` | `300` (upload mode `600`) | Seconds between the looks for new activities, of `run` (`--poll-seconds` wins) and of the `watch` timer; the fastest pace, in the adaptive mode too ([How often it looks](#how-often-it-looks)) |
+| `BRIDGE_POLL_HOURS` | always | Look only in these hours, e.g. `10-18` or `6-9,16-22` (`22-6` runs over midnight). Outside them not at all – or every `BRIDGE_POLL_QUIET_SECONDS`; the half-hourly full runs go on, so an activity still arrives (within about two hours) and so does last night's wellness |
+| `BRIDGE_POLL_QUIET_SECONDS` | | Outside `BRIDGE_POLL_HOURS` look this often instead of not at all, and at unusual times in the adaptive mode (there `1800` by default); at the full pace again for an hour after a new activity |
+| `BRIDGE_POLL_MODE` | `fixed` | `adaptive` (beta): learn when your activities usually end, look at the full pace only then |
 | `BRIDGE_SWAP` | `false` | `true`: swap Garmin's filtered copy of each new activity for its original (upload, then delete the copy; see [Modes](#modes)) |
 | `BRIDGE_SWAP_HOURS` | `48` | Only copies imported this recently are swapped automatically |
 | `BRIDGE_OPTIONS_FILE` | `/data/options.json` | A Home Assistant app's form, read when there is no settings file (its keys: `home-assistant/config.yaml`) |

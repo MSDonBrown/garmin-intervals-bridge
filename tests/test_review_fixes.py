@@ -339,6 +339,20 @@ def test_env_file_fills_missing_variables_only(tmp_path, monkeypatch):
     assert "lower" not in os.environ
 
 
+def _clock(monkeypatch, calls=None, jump=0):
+    """A clock the loop's waits move on (at least `jump` seconds each), so the polls fall due."""
+    from garmin_intervals_bridge import cli
+    now = [1_800_000_000.0]
+
+    def sleep(seconds):
+        if calls is not None:
+            calls.append(("sleep", seconds))
+        now[0] += max(seconds, jump)
+    monkeypatch.setattr(cli.time, "time", lambda: now[0])
+    monkeypatch.setattr(cli.time, "sleep", sleep)
+    return now
+
+
 def _loop_settings(tmp_path):
     return SimpleNamespace(data_dir=tmp_path, token_dir=tmp_path / "tokens", intervals_api_key="k",
                            intervals_athlete_id="0", garmin_request_delay=0.5, timezone=ZoneInfo("Europe/Vienna"),
@@ -368,7 +382,7 @@ def test_run_loop_does_a_full_run_then_polls(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "watch_once", lambda *a, **k: calls.append("watch") or {"new": 0, "enriched": 0, "planned": 0})
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: calls.append("check") or {"intervals_checks": 1})
     monkeypatch.setattr(cli, "probe", lambda *a, **k: calls.append("probe") or {"findings": []})
-    monkeypatch.setattr(cli.time, "sleep", lambda s: calls.append(("sleep", s)))
+    _clock(monkeypatch, calls)
     st = Store(tmp_path)
     assert cli.run_loop(_loop_settings(tmp_path), st, apply=False, poll_seconds=60, sync_minutes=30, iterations=3) == 0
     assert calls == ["sync", "wellness", ("sleep", 60), "watch", "check", ("sleep", 60), "watch", "check"]
@@ -389,7 +403,7 @@ def test_run_loop_survives_a_block_and_other_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "sync_wellness", lambda *a, **k: {"days_checked": 0, "writes": 0})
     monkeypatch.setattr(cli, "watch_once", lambda *a, **k: {"new": 0, "enriched": 0, "planned": 0})
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: {})
-    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    _clock(monkeypatch)
     st = Store(tmp_path)
     # iteration 1: block (pauses the full run), 2: poll, 3: poll ... the loop never dies
     assert cli.run_loop(_loop_settings(tmp_path), st, apply=False, poll_seconds=60, sync_minutes=30, iterations=4) == 0
@@ -500,7 +514,7 @@ def test_run_loop_upload_mode_polls_garmin_and_uploads(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "sync_wellness", lambda *a, **k: calls.append("wellness") or {"days_checked": 0, "writes": 0})
     monkeypatch.setattr(cli, "watch_once", lambda *a, **k: calls.append("watch") or {"new": 0})
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: calls.append("check") or {})
-    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    _clock(monkeypatch, jump=600)
     st = Store(tmp_path)
     assert cli.run_loop(_loop_settings(tmp_path), st, apply=True, poll_seconds=600, sync_minutes=30, iterations=3,
                         mode="upload") == 0
@@ -604,14 +618,14 @@ def test_upload_mode_puts_the_gear_on_the_uploaded_originals_too(tmp_path, monke
 
 
 def test_outside_the_poll_hours_only_the_full_runs_go_on(tmp_path, monkeypatch):
-    from garmin_intervals_bridge import cli
+    from garmin_intervals_bridge import cli, polling
     calls = []
     monkeypatch.setattr(cli, "sync_enrich", lambda *a, **k: calls.append("sync") or {"seen": 0, "enriched": 0,
                                                                                     "planned": 0})
     monkeypatch.setattr(cli, "sync_wellness", lambda *a, **k: {"days_checked": 0, "writes": 0})
     monkeypatch.setattr(cli, "watch_once", lambda *a, **k: calls.append("watch") or {"new": 0})
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: calls.append("check") or {})
-    monkeypatch.setattr(cli, "within_hours", lambda when, ranges: not ranges)      # a window that is closed now
+    monkeypatch.setattr(polling, "within_hours", lambda when, ranges: not ranges)      # a window that is closed now
     monkeypatch.setattr(cli.time, "sleep", lambda s: None)
     settings = _loop_settings(tmp_path)
     settings.poll_hours = ((600, 1080),)
@@ -622,11 +636,11 @@ def test_outside_the_poll_hours_only_the_full_runs_go_on(tmp_path, monkeypatch):
 
 
 def test_watch_waits_outside_the_poll_hours(tmp_path, monkeypatch, capsys):
-    from garmin_intervals_bridge import cli
+    from garmin_intervals_bridge import cli, polling
     monkeypatch.setenv("BRIDGE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("INTERVALS_API_KEY", "not-a-real-key")
     monkeypatch.setenv("BRIDGE_POLL_HOURS", "10-18")
-    monkeypatch.setattr(cli, "within_hours", lambda when, ranges: False)
+    monkeypatch.setattr(polling, "within_hours", lambda when, ranges: False)
     monkeypatch.setattr(cli, "watch_once", lambda *a, **k: pytest.fail("no poll outside the window"))
     assert main(["watch", "--apply"]) == 0 and "outside BRIDGE_POLL_HOURS" in capsys.readouterr().out
 
@@ -667,7 +681,7 @@ def test_a_poll_counts_only_its_own_garmin_requests(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "sync_wellness", lambda *a, **k: {"days_checked": 0, "writes": 0})
     monkeypatch.setattr(cli, "watch_once", poll)
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: {})
-    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    _clock(monkeypatch)
     st = Store(tmp_path)
     cli.run_loop(_loop_settings(tmp_path), st, apply=True, poll_seconds=60, sync_minutes=30, iterations=4)
     assert [r["metrics"]["garmin_requests"] for r in st.recent_runs(1)] == [50, 1, 0, 0]

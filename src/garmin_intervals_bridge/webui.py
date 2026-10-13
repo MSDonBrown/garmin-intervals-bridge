@@ -39,9 +39,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
-from . import __version__, alerts, autostart, hrvtrend, imready4, notices
+from . import __version__, alerts, autostart, hrvtrend, imready4, notices, polling
 from .charts import setup_charts
-from .config import Settings
+from .config import Settings, poll_hours
 from .enrich import enrich_activity, resolve_one
 from .garmin import GarminBlocked, GarminSource
 from .gear import apply_plan as apply_gear_plan
@@ -211,9 +211,9 @@ class UI:
                 f'<input type="hidden" name="csrf" value="{esc(session.csrf)}">{inner}'
                 f'<button{" class=light" if light else ""}>{esc(button)}</button></form>')
 
-    def status(self, session: Session, query: dict, form: dict) -> str:
+    def status(self, session: Session, query: dict, form: dict, note: str = "") -> str:
         settings = self.settings()
-        parts: list[str] = []
+        parts: list[str] = [note] if note else []
         latest = self.update_available()
         if latest:
             how = ("Pull the new image and recreate the container." if autostart.platform() == "container" else
@@ -265,6 +265,8 @@ class UI:
                                       "upload": "upload the originals to Intervals",
                                       "backup": "back up Garmin to this computer (no Intervals)"}[settings.mode]
                                      + (" + swap" if settings.swap and settings.mode == "enrich" else ""))))
+            if settings.mode != "backup":
+                rows.append(("New activities", self._polls(session, settings, store, now)))
             rows.append(("Day boundary", esc(settings.timezone.key)))
             on = [name for name, flag in (("ImReady4 advice", settings.imready4),
                                           ("HRV trend advice", settings.hrvtrend)) if flag]
@@ -282,6 +284,40 @@ class UI:
         finally:
             store.close()
         return self.page(session, "Status", "".join(parts))
+
+    def _polls(self, session: Session, settings: Settings, store: Store, now: float) -> str:
+        """When the bridge looks for new activities, why, and the button to look now."""
+        fast = polling.fast_seconds(settings, settings.mode)
+        plan = esc(polling.schedule_text(settings, store, now, fast))
+        paused = float(store.get_meta(polling.PAUSE_KEY) or 0)
+        if paused > now:
+            state = (f'<b class="warn">paused until {datetime.fromtimestamp(paused, settings.timezone):%H:%M}</b> '
+                     '(Intervals.icu asked for a break, HTTP 429)')
+        else:
+            wanted, why = polling.interval(settings, store, now, fast)
+            last = store.last_run("watch")
+            if wanted is None:
+                state = f"now: {esc(why)}"
+            else:
+                left = (last or 0) + wanted - now
+                state = f"now every {esc(polling.span(wanted))} ({esc(why)}); next look " + (
+                    f"in about {esc(polling.span(left))}" if left >= 60 else "within a minute")
+        button = self.form(session, "/poll-now", "", "Check now", light=True, inline=True)
+        return f'{plan}<br><span class="muted">{state}</span> {button}'
+
+    def poll_now(self, session: Session, query: dict, form: dict) -> str:
+        """Look for new activities now, and at the fast pace for the next hour."""
+        settings = self.settings()
+        store = Store(settings.data_dir)
+        try:
+            store.set_meta(polling.NOW_KEY, f"{time.time():.0f}")
+        finally:
+            store.close()
+        polling.POLL_NOW.set()                          # a `run` in this process: at once
+        when = "now" if self.in_run else "within a minute"
+        return self.status(session, query, {}, f'<section><p class="ok">The bridge looks for new activities {when}'
+                                                ' and keeps looking at its fastest pace for the next hour. What it '
+                                                'found shows in the <a href="/log">log</a>.</p></section>')
 
     # -- Garmin --
 
@@ -355,6 +391,7 @@ class UI:
                     ("HRV trend advice", settings.hrvtrend), ("Update hint", settings.update_check),
                     ("Calendar note when Garmin needs a sign-in", settings.intervals_notes),
                     ("Swap Garmin's copy for the original", settings.swap),
+                    ("New activities", self._schedule(settings)),
                     ("Alerts", ", ".join(alerts.channels(settings)) or "none (BRIDGE_ALERT_EMAIL, BRIDGE_NTFY_URL)")]
             table = "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in rows)
             where = ("the app's <i>Configuration</i> tab in Home Assistant" if self.ingress else
@@ -378,6 +415,7 @@ class UI:
                                "then keeps everything)", settings.swap)
                  + '<label>Replace the Intervals API key (leave empty to keep it) <input type="password" '
                    'name="api_key" autocomplete="off"></label>'
+                 + self._poll_fields(settings)
                  + '<h2>When the bridge needs you</h2><p class="muted">Garmin wants a new sign-in, or the bridge '
                    'has been failing for a day: besides the calendar note, an e-mail and/or a push message.</p>'
                  + f'<label>E-mail address (empty = no e-mail) <input type="email" name="alert_email" '
@@ -399,6 +437,33 @@ class UI:
         return self.page(session, "Settings", f'{message}<section>{self.form(session, "/settings", inner, "Save")}'
                          f'{hint}<p class="muted">Saved in {esc(settings.env_file)}</p></section>'
                          f'{self._test_form(session, settings)}')
+
+    def _schedule(self, settings: Settings) -> str:
+        store = Store(settings.data_dir)
+        try:
+            return polling.schedule_text(settings, store, time.time(), polling.fast_seconds(settings, settings.mode))
+        finally:
+            store.close()
+
+    def _poll_fields(self, settings: Settings) -> str:
+        if settings.mode == "backup":
+            return ""
+        def minutes(seconds: int | None) -> str:
+            return f"{seconds / 60:g}" if seconds else ""
+        hours = ", ".join(polling.hours_range(a, b) for a, b in settings.poll_hours)
+        return ('<h2>Looking for new activities</h2><p class="muted">Each look is one small request to Intervals.icu '
+                f'(Garmin in upload mode). Now: {esc(self._schedule(settings))}.</p>'
+                f'<label>Every … minutes (empty = {5 if settings.mode != "upload" else 10}) <input type="text" '
+                f'name="poll_minutes" value="{esc(minutes(settings.poll_seconds))}" inputmode="decimal"></label>'
+                f'<label>Only between (e.g. 7-23 or 6:30-9, 16-22; empty = all day) <input type="text" '
+                f'name="poll_hours" value="{esc(hours)}"></label>'
+                f'<label>Outside those hours every … minutes (empty = not at all) <input type="text" '
+                f'name="poll_quiet_minutes" value="{esc(minutes(settings.poll_quiet_seconds))}" '
+                f'inputmode="decimal"></label>'
+                f'<label><input type="checkbox" name="poll_adaptive" value="1"'
+                f'{" checked" if settings.poll_mode == "adaptive" else ""}> Beta: learn when my activities usually '
+                'end and look at the pace above only then, less often otherwise – fewer requests for Intervals.icu'
+                '</label>')
 
     def _test_form(self, session: Session, settings: Settings) -> str:
         if not alerts.channels(settings):
@@ -429,6 +494,9 @@ class UI:
                           ("update_check", "BRIDGE_UPDATE_CHECK"), ("intervals_notes", "BRIDGE_INTERVALS_NOTES"),
                           ("swap", "BRIDGE_SWAP")):
             values[name] = "true" if form.get(key) == "1" else "false"
+        problem = self._poll_values(settings, form, values)
+        if problem:
+            return self.settings_page(session, f'<p class="bad">{esc(problem)}; nothing was changed.</p>')
         key = form.get("api_key", "").strip()
         if key:
             try:
@@ -463,6 +531,34 @@ class UI:
             restart = "<p>Restart the bridge to use them.</p>"
         return self.settings_page(session, f'<section><p class="ok"><b>Saved.</b> The running bridge uses them '
                                            f'after a restart.</p>{restart}</section>')
+
+    @staticmethod
+    def _poll_values(settings: Settings, form: dict, values: dict) -> str | None:
+        """The look-for-new-activities fields into `values`; what is wrong with them, if anything."""
+        if settings.mode == "backup":
+            return None
+        seconds = {}
+        for field, name, low in (("poll_minutes", "BRIDGE_POLL_SECONDS", 5 if settings.mode == "upload" else 1),
+                                 ("poll_quiet_minutes", "BRIDGE_POLL_QUIET_SECONDS", 1)):
+            text = form.get(field, "").strip().replace(",", ".")
+            try:
+                value = round(float(text) * 60) if text else None
+            except ValueError:
+                return f'"{text}" is no number of minutes'
+            if value is not None and not low * 60 <= value <= 24 * 3600:
+                return f"Looking every {text} minutes: between {low} and 1440, please"
+            seconds[name] = value
+            values[name] = str(value) if value else ""
+        try:
+            poll_hours(form.get("poll_hours", ""))
+        except ValueError as exc:
+            return str(exc).replace("BRIDGE_POLL_HOURS: ", "Hours ")
+        fast = seconds["BRIDGE_POLL_SECONDS"] or (600 if settings.mode == "upload" else 300)
+        if seconds["BRIDGE_POLL_QUIET_SECONDS"] and seconds["BRIDGE_POLL_QUIET_SECONDS"] < fast:
+            return "Outside the hours the bridge can only look less often, not more"
+        values["BRIDGE_POLL_HOURS"] = form.get("poll_hours", "").strip()
+        values["BRIDGE_POLL_MODE"] = "adaptive" if form.get("poll_adaptive") == "1" else "fixed"
+        return None
 
     def restart_post(self, session: Session, query: dict, form: dict) -> str:
         settings = self.settings()
@@ -670,7 +766,7 @@ POST_PAGES = {"/garmin": "garmin_post", "/garmin/mfa": "garmin_mfa", "/settings"
               "/settings/test": "alert_test",
               "/restart": "restart_post", "/actions/gear": "gear_post", "/actions/gear-apply": "gear_apply",
               "/actions/charts": "charts_post", "/actions/advice": "advice_post", "/actions/enrich": "enrich_post",
-              "/actions/enrich-apply": "enrich_apply"}
+              "/actions/enrich-apply": "enrich_apply", "/poll-now": "poll_now"}
 
 
 def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
