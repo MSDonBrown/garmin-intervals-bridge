@@ -94,6 +94,26 @@ happened; all are closed:
   ask for an Intervals key.
 - Tests can no longer reach the internet. A few of them had been sending dummy requests
   to intervals.icu unnoticed.
+- **The web page:**
+  - A request gets 20 seconds. At most 16 are served at once, and further connections are
+    closed. A negative or broken length is refused before anything is read.
+  - Password guesses take turns, so guessing in parallel is no faster than one at a time.
+  - Behind an HTTPS reverse proxy (`X-Forwarded-Proto: https`) the session cookie is
+    `Secure`.
+- **Settings:**
+  - A value with a line break is refused, so a form field can no longer add a setting of
+    its own. Values that start and end with a quote, or with a space, are saved quoted and
+    read back unchanged.
+  - Two saves at once (a double click) take turns and use a fresh temporary file each, so
+    no setting is lost.
+  - A setting the bridge could not start with (an SMTP port of 65536, say) is not kept, and
+    the page says why. Before, it locked out the web page and stopped the bridge from
+    starting.
+  - `BRIDGE_POLL_HOURS` is read strictly: `6:99` or `24-0` are errors, `22-24` works.
+- Log files stay readable by their owner only after a rotation too, in a private folder.
+- Home Assistant app: taking over a copied data folder keeps the app's own form settings,
+  whatever the folder brought along. The empty database of an earlier start is set aside
+  (`bridge.db.before-takeover`) instead of deleted.
 
 ## 0.10.3 — 2026-10-13
 

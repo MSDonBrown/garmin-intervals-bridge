@@ -62,6 +62,8 @@ COOKIE = "gib_session"
 SESSION_SECONDS = 12 * 3600
 PENDING_SECONDS = 10 * 60
 MAX_BODY = 64 * 1024
+MAX_CONNECTIONS = 16                       # requests served at once; more wait in the kernel's queue
+REQUEST_SECONDS = 20                       # a request (headers and body) that takes longer is dropped
 PLACEHOLDER = "change-me-please"           # what the templates ship with; never accepted
 INGRESS_IP = "172.30.32.2"                 # Home Assistant's ingress proxy: the only client then
 INGRESS_PATH = re.compile(r"/api/hassio_ingress/[A-Za-z0-9_-]{1,200}")
@@ -145,6 +147,7 @@ class UI:
         self.sessions: dict[str, Session] = {}
         self.lock = threading.Lock()
         self.failures = 0
+        self.login_gate = threading.Lock()          # one password check at a time: guessing stays slow
         self._update: tuple[float, str | None] = (0.0, None)
 
     @property
@@ -484,7 +487,7 @@ class UI:
         return self.settings_page(session, f"<section><h2>Test message</h2><ul>{lines}</ul></section>")
 
     def settings_post(self, session: Session, query: dict, form: dict) -> str:
-        from .wizard import write_env
+        from .wizard import write_env, write_private
         settings = self.settings()
         if settings.env_file is None:
             raise Reply(403, "Settings come from the container here")
@@ -512,7 +515,7 @@ class UI:
             values["INTERVALS_API_KEY"] = key
         email = form.get("alert_email", "").strip()
         port = form.get("smtp_port", "").strip()
-        if (email and "@" not in email) or (port and not port.isdigit()):
+        if (email and "@" not in email) or (port and not (port.isdigit() and 1 <= int(port) <= 65535)):
             return self.settings_page(session, '<p class="bad">That e-mail address or port does not look right; '
                                                'nothing was changed.</p>')
         values.update({"BRIDGE_ALERT_EMAIL": email, "BRIDGE_SMTP_HOST": form.get("smtp_host", "").strip(),
@@ -526,8 +529,21 @@ class UI:
                                          or f"https://ntfy.sh/garmin-bridge-{secrets.token_hex(8)}")
         else:
             values["BRIDGE_NTFY_URL"] = ""
-        write_env(settings.env_file, values)
-        os.environ.update(values)
+        before = settings.env_file.read_text(encoding="utf-8-sig") if settings.env_file.is_file() else None
+        previous = {key: os.environ.get(key) for key in values}
+        try:
+            write_env(settings.env_file, values)
+            os.environ.update(values)
+            Settings.from_env()                          # the bridge must still start with them
+        except ValueError as exc:
+            for key, value in previous.items():          # nothing changed: the file, the process
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            if before is not None:
+                write_private(settings.env_file, before)
+            return self.settings_page(session, f'<p class="bad">{esc(exc)}; nothing was changed.</p>')
         restart = ""
         if not self.in_run and autostart.platform() != "container" and \
                 autostart.status(settings.env_file)["installed"]:
@@ -778,6 +794,7 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "garmin-intervals-bridge"
         sys_version = ""
+        timeout = REQUEST_SECONDS                    # a client that sends nothing does not hold a thread
 
         def log_message(self, format: str, *args: Any) -> None:       # no URLs (the key) in any log
             pass
@@ -789,6 +806,11 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
             self._handle("POST")
 
         prefix = ""                                 # Home Assistant's ingress path, for every link
+
+        @property
+        def secure(self) -> str:
+            """Behind an HTTPS reverse proxy the session cookie travels over HTTPS only."""
+            return "; Secure" if (self.headers.get("X-Forwarded-Proto") or "").lower() == "https" else ""
 
         def _send(self, status: int, body: str = "", headers: dict | None = None) -> None:
             if self.prefix:                         # our own markup only: user text is escaped (&quot;)
@@ -828,8 +850,11 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
                     raise Reply(403, "Wrong host")
             form: dict = {}
             if method == "POST":
-                length = int(self.headers.get("Content-Length") or 0)
-                if length > MAX_BODY:
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    raise Reply(400, "Bad length") from None
+                if not 0 <= length <= MAX_BODY:
                     raise Reply(413, "Too large")
                 raw = self.rfile.read(length).decode("utf-8", errors="replace")
                 form = {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
@@ -846,7 +871,8 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
                 with ui.lock:
                     ui.sessions.pop(session.id, None)
                 raise Reply(303, "", {"Location": "/login" if ui.password else "/",
-                                      "Set-Cookie": f"{COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict"})
+                                      "Set-Cookie": f"{COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict"
+                                                    + self.secure})
             if method == "POST":
                 if not hmac.compare_digest(form.get("csrf", ""), session.csrf):
                     raise Reply(403, "Form expired; reload the page")
@@ -867,7 +893,7 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
 
         def _without_session(self, method: str, path: str, query: dict, form: dict) -> str:
             cookie = ("{0}={1}; Path=" + (self.prefix or "/") + "; HttpOnly; SameSite=Strict; Max-Age="
-                      + str(SESSION_SECONDS))
+                      + str(SESSION_SECONDS) + self.secure)
             if ui.ingress:                          # Home Assistant signed the user in already
                 session = ui.new_session()
                 raise Reply(303, "", {"Location": path, "Set-Cookie": cookie.format(COOKIE, session.id)})
@@ -879,15 +905,22 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
                                          "<section><p>This page opens with the link "
                                          "<code>garmin-intervals-bridge ui</code> printed.</p></section>"))
             if path == "/login" and method == "POST":
-                if ui.password and hmac.compare_digest(form.get("password", "").encode(), ui.password.encode()):
+                if not ui.login_gate.acquire(blocking=False):        # guesses in parallel: one at a time
+                    return ui.login_page('<p class="warn">Another sign-in is being checked; try again in a '
+                                         'moment.</p>')
+                try:
+                    if ui.password and hmac.compare_digest(form.get("password", "").encode(),
+                                                           ui.password.encode()):
+                        with ui.lock:
+                            ui.failures = 0
+                        session = ui.new_session()
+                        raise Reply(303, "", {"Location": "/", "Set-Cookie": cookie.format(COOKIE, session.id)})
                     with ui.lock:
-                        ui.failures = 0
-                    session = ui.new_session()
-                    raise Reply(303, "", {"Location": "/", "Set-Cookie": cookie.format(COOKIE, session.id)})
-                with ui.lock:
-                    ui.failures += 1
-                    pause = min(30, ui.failures)
-                time.sleep(pause)                                    # slows guessing down
+                        ui.failures += 1
+                        pause = min(30, ui.failures)
+                    time.sleep(pause)                                # slows guessing down
+                finally:
+                    ui.login_gate.release()
                 return ui.login_page('<p class="bad">Wrong password.</p>')
             if path == "/login":
                 return ui.login_page()
@@ -906,9 +939,33 @@ def check(host: str, password: str | None, in_run: bool) -> None:
                          " needs BRIDGE_UI_PASSWORD (8 characters or more)")
 
 
+class _Server(ThreadingHTTPServer):
+    """At most MAX_CONNECTIONS requests at once; one more is closed instead of getting a thread."""
+    daemon_threads = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+
+    def process_request(self, request, client_address):
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
+
+
 def make_server(ui: UI) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((ui.host, ui.port), handler_for(ui))
-    server.daemon_threads = True
+    server = _Server((ui.host, ui.port), handler_for(ui))
     ui.port = server.server_address[1]
     return server
 

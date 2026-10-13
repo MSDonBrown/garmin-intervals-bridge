@@ -1,6 +1,7 @@
 """The second review's findings on running the bridge: rate limits, failing full runs, the
 look-for-new-activities timing, health, retries outside the scan window."""
 
+import time
 from datetime import date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -8,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import requests
 from test_review_fixes import _clock, _loop_settings
+from test_webui import call, csrf, env, page  # noqa: F401  (fixtures)
 
 from garmin_intervals_bridge import cli, health, intervals, polling, sync
 from garmin_intervals_bridge.store import Store
@@ -129,12 +131,12 @@ def test_a_failure_older_than_the_scan_window_is_retried_by_its_id(tmp_path, mon
 def test_the_short_activity_list_falls_back_when_the_first_day_may_hold_more(tmp_path):
     from garmin_intervals_bridge.garmin import GarminSource
     g = GarminSource(tmp_path)
-    page = [{"activityId": n, "startTimeLocal": f"2026-10-0{1 if n == 0 else 5} 08:00:00"} for n in range(100)]
+    listing = [{"activityId": n, "startTimeLocal": f"2026-10-0{1 if n == 0 else 5} 08:00:00"} for n in range(100)]
     asked = []
 
     def call(name, *args):
         asked.append(name)
-        return page if name == "get_activities" else page + [{"activityId": 100, "startTimeLocal": "2026-10-01 07:00"}]
+        return listing if name == "get_activities" else listing + [{"activityId": 100, "startTimeLocal": "2026-10-01 07:00"}]
     g._call = call
     assert len(g.activities(date(2026, 10, 1), date(2026, 10, 5))) == 101
     assert asked == ["get_activities", "get_activities_by_date"]
@@ -153,3 +155,152 @@ def test_health_and_garmin_only_backfills_need_no_intervals_key(tmp_path, monkey
     assert cli.main(["backfill", "--scope", "wellness", "--wellness-files", "--from", "2026-10-01",
                      "--to", "2026-10-02"]) == 0
     assert '"days": 1' in capsys.readouterr().out
+
+
+# ---- the web page and the settings file ----
+
+def _web():
+    from test_webui import FakeGarmin, FakeIntervals, serve
+    return FakeGarmin, FakeIntervals, serve
+
+
+def test_a_negative_or_broken_length_is_refused_before_anything_is_read(page):  # noqa: F811
+    import http.client
+    for length in ("-1", "lots"):
+        conn = http.client.HTTPConnection("127.0.0.1", page.port, timeout=10)
+        conn.putrequest("POST", "/login")
+        conn.putheader("Host", f"127.0.0.1:{page.port}")
+        conn.putheader("Content-Length", length)
+        conn.endheaders()
+        assert conn.getresponse().status in (400, 413)
+        conn.close()
+
+
+def test_more_connections_than_allowed_are_closed_not_served(env, monkeypatch):  # noqa: F811
+    import socket
+
+    from garmin_intervals_bridge import webui
+    _, _, serve = _web()
+    monkeypatch.setattr(webui, "MAX_CONNECTIONS", 2)
+    monkeypatch.setattr(webui, "REQUEST_SECONDS", 3)
+    ui = webui.UI(host="127.0.0.1", port=0, key="the-key", newer_release=lambda: None)
+    server = serve(ui)
+    idle = [socket.create_connection(("127.0.0.1", ui.port)) for _ in range(2)]   # sending nothing
+    try:
+        time.sleep(0.3)
+        extra = socket.create_connection(("127.0.0.1", ui.port))
+        extra.settimeout(2)
+        extra.sendall(b"GET / HTTP/1.0\r\n\r\n")
+        assert extra.recv(100) == b""                                       # closed at once
+        extra.close()
+        time.sleep(3.5)                                                    # the idle ones time out ...
+        assert call(ui, "GET", "/")[0] in (303, 403)                        # ... and the page answers again
+    finally:
+        for s in idle:
+            s.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_password_guesses_take_turns_and_https_keeps_the_cookie_on_https(env, monkeypatch):  # noqa: F811
+    from garmin_intervals_bridge import webui
+    FakeGarmin, FakeIntervals, serve = _web()
+    monkeypatch.setattr(webui.time, "sleep", lambda s: None)
+    ui = webui.UI(host="127.0.0.1", port=0, password="long enough", in_run=True, intervals_client=FakeIntervals,
+                  garmin_source=FakeGarmin, newer_release=lambda: None)
+    server = serve(ui)
+    try:
+        ui.login_gate.acquire()                                            # a guess is being checked
+        assert "Another sign-in is being checked" in call(ui, "POST", "/login", {"password": "x"})[2]
+        ui.login_gate.release()
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", ui.port, timeout=10)
+        conn.request("POST", "/login", body="password=long+enough", headers={
+            "Host": f"127.0.0.1:{ui.port}", "X-Forwarded-Proto": "https",
+            "Content-Type": "application/x-www-form-urlencoded"})
+        cookie = conn.getresponse().getheader("Set-Cookie")
+        assert cookie.endswith("; Secure")
+        conn.close()
+        status, headers, _ = call(ui, "POST", "/login", {"password": "long enough"})
+        assert "Secure" not in headers["set-cookie"]                       # plain http at home: as before
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_settings_lines_keep_their_value_and_take_no_second_line(tmp_path):
+    from garmin_intervals_bridge.config import parse_env_file
+    from garmin_intervals_bridge.wizard import write_env
+    path = tmp_path / ".env"
+    with pytest.raises(ValueError, match="line break"):
+        write_env(path, {"BRIDGE_SMTP_HOST": "smtp.example\nBRIDGE_DATA_DIR=/elsewhere"})
+    values = {"BRIDGE_SMTP_PASSWORD": '"quoted"', "BRIDGE_SMTP_FROM": " spaced ", "BRIDGE_ALERT_EMAIL": "a@b.c"}
+    write_env(path, values)
+    assert {k: parse_env_file(path)[k] for k in values} == values
+
+
+def test_two_saves_at_once_lose_nothing(tmp_path):
+    import threading
+
+    from garmin_intervals_bridge.config import parse_env_file
+    from garmin_intervals_bridge.wizard import write_env
+    path = tmp_path / ".env"
+    write_env(path, {"INTERVALS_API_KEY": "k"})
+    errors = []
+
+    def save(n):
+        try:
+            for i in range(40):
+                write_env(path, {f"BRIDGE_TEST_{n}": str(i)})
+        except Exception as exc:
+            errors.append(exc)
+    threads = [threading.Thread(target=save, args=(n,)) for n in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    values = parse_env_file(path)
+    assert errors == [] and values["INTERVALS_API_KEY"] == "k"
+    assert all(values[f"BRIDGE_TEST_{n}"] == "39" for n in range(4))
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_a_setting_the_bridge_could_not_start_with_is_not_kept(page, env):  # noqa: F811
+    from test_webui import signed_in
+    cookie = signed_in(page)
+    before = env.read_text()
+    token = csrf(call(page, "GET", "/settings", cookie=cookie)[2])
+    for wrong, says in (({"alert_email": "a@b.c", "smtp_port": "65536"}, "does not look right"),
+                        ({"poll_hours": "24-0"}, "no range of the day")):
+        text = call(page, "POST", "/settings", {"csrf": token, "timezone": "Europe/Vienna", **wrong},
+                    cookie=cookie)[2]
+        assert says in text and "nothing was changed" in text
+    assert env.read_text() == before
+    assert call(page, "GET", "/", cookie=cookie)[0] == 200                  # the page still works
+
+
+def test_poll_hours_are_read_strictly():
+    from garmin_intervals_bridge.config import poll_hours
+    assert poll_hours("22-24") == ((1320, 1440),)
+    for wrong in ("6:99-9", "24-0", "7\n-9", "0-24:30", "10-10"):
+        with pytest.raises(ValueError, match="BRIDGE_POLL_HOURS"):
+            poll_hours(wrong)
+
+
+def test_a_rotated_log_stays_private(tmp_path, monkeypatch):
+    import logging
+    import os
+    from logging.handlers import RotatingFileHandler
+    old = os.umask(0o022)
+    try:
+        path = tmp_path / "logs" / "bridge.log"
+        cli._log_to_file(path, logging.INFO)
+        handler = next(h for h in logging.getLogger().handlers if isinstance(h, RotatingFileHandler)
+                       and h.baseFilename == str(path))
+        logging.getLogger("bridge").info("a line")
+        handler.doRollover()
+        logging.getLogger("bridge").info("another line")
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
+        assert oct(path.parent.stat().st_mode & 0o777) == "0o700"
+    finally:
+        os.umask(old)

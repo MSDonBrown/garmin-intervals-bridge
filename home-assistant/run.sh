@@ -10,8 +10,13 @@ SHARE=${HA_SHARE:-/share}
 if [ ! -e "$DATA/.taken-over" ] && [ -e "$SHARE/garmin-bridge/bridge.db" ] \
         && ! ls "$DATA"/tokens/*.json >/dev/null 2>&1 && [ -z "$(ls -A "$DATA/fits" 2>/dev/null)" ]; then
     echo "Taking over the data folder from $SHARE/garmin-bridge (Garmin session, archive)"
-    rm -f "$DATA/bridge.db" "$DATA/bridge.db-wal" "$DATA/bridge.db-shm"     # the empty one of an earlier start
+    for f in bridge.db bridge.db-wal bridge.db-shm; do     # the empty one of an earlier start: kept aside
+        if [ -e "$DATA/$f" ]; then mv -f "$DATA/$f" "$DATA/$f.before-takeover"; fi
+    done
+    if [ -e "$DATA/options.json" ]; then cp -p "$DATA/options.json" "$DATA/.options.json.app"; fi
     cp -a "$SHARE/garmin-bridge/." "$DATA/"
+    # the app's own form stays what Home Assistant says, whatever the copied folder brought along
+    if [ -e "$DATA/.options.json.app" ]; then mv -f "$DATA/.options.json.app" "$DATA/options.json"; fi
     touch "$DATA/.taken-over"
 fi
 export BRIDGE_DATA_DIR="$DATA" GARMIN_TOKEN_DIR="$DATA/tokens" BRIDGE_OPTIONS_FILE="$DATA/options.json"

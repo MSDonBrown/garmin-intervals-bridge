@@ -89,12 +89,12 @@ def poll_hours(text: str) -> tuple[tuple[int, int], ...]:
     """'10-18', '6:30-9,17-22', '22-6' (over midnight) -> ranges in minutes after midnight."""
     ranges = []
     for part in [p.strip() for p in (text or "").split(",") if p.strip()]:
-        found = re.fullmatch(r"(\d{1,2})(?::(\d\d))?\s*-\s*(\d{1,2})(?::(\d\d))?", part)
+        found = re.fullmatch(r"(\d{1,2})(?::([0-5]\d))?[ \t]*-[ \t]*(\d{1,2})(?::([0-5]\d))?", part)
         if not found:
             raise ValueError(f"BRIDGE_POLL_HOURS: '{part}' is no range like 10-18 or 6:30-9")
         start = int(found.group(1)) * 60 + int(found.group(2) or 0)
         end = int(found.group(3)) * 60 + int(found.group(4) or 0)
-        if start > 24 * 60 or end > 24 * 60 or start == end:
+        if start >= 24 * 60 or end > 24 * 60 or start == end % (24 * 60):    # 24 only as an end: 22-24
             raise ValueError(f"BRIDGE_POLL_HOURS: '{part}' is no range of the day")
         ranges.append((start, end))
     return tuple(ranges)

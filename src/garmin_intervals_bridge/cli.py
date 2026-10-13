@@ -457,11 +457,18 @@ def wait_after_block(exc: GarminBlocked, seconds: float = 900) -> bool:
 def _log_to_file(path: Path, level: int) -> None:
     """Also log to a file (the autostarted bridge has no window): 5 MB, three old ones kept."""
     from logging.handlers import RotatingFileHandler
+
+    class PrivateLog(RotatingFileHandler):
+        """Every log file – the first and each one after a rotation – readable by its owner only."""
+
+        def _open(self):
+            fd = os.open(self.baseFilename, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            return os.fdopen(fd, "a", encoding=self.encoding, errors=self.errors)
     root = logging.getLogger()
     if any(isinstance(h, RotatingFileHandler) and Path(h.baseFilename) == path for h in root.handlers):
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(path, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    handler = PrivateLog(path, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
     try:
         path.chmod(0o600)                       # activities and health data: the owner's only
     except OSError:

@@ -138,10 +138,12 @@ def test_the_app_takes_a_data_folder_over_even_after_an_empty_first_start(tmp_pa
     (share / "garmin-bridge" / "tokens").mkdir(parents=True)
     (share / "garmin-bridge" / "bridge.db").write_text("the NAS's")
     (share / "garmin-bridge" / "tokens" / "garmin_tokens.json").write_text("{}")
+    (share / "garmin-bridge" / "options.json").write_text('{"write_to_intervals": true}')    # another app's
     out = _run_app(tmp_path, data, share)
     assert "Taking over" in out and "started: run\n" in out                       # dry run: no --apply
     assert (data / "bridge.db").read_text() == "the NAS's" and (data / "tokens" / "garmin_tokens.json").exists()
     assert (data / "options.json").read_text() == '{"write_to_intervals": false}'   # the form stays
+    assert (data / "bridge.db.before-takeover").read_text().startswith("empty")      # kept aside, not deleted
     # never again, and never over a session of its own
     (data / "bridge.db").write_text("its own by now")
     (data / "options.json").write_text('{"write_to_intervals": true}')

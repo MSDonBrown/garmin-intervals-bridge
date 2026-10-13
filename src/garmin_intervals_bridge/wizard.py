@@ -14,6 +14,8 @@ import os
 import secrets
 import shutil
 import sys
+import tempfile
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -88,22 +90,47 @@ class Prompt:
 
 # ---- the settings file ----
 
+_ENV_LOCK = threading.Lock()                # two saves at once (a double click) take turns
+
+
+def env_value(value: str) -> str:
+    """A value as a settings line keeps it: quoted when reading it back would change it."""
+    if any(c in value for c in "\r\n\0"):
+        raise ValueError("A setting cannot contain a line break")
+    if value != value.strip() or (len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'"):
+        quote = "'" if value.startswith('"') and value.endswith('"') else '"'
+        return f"{quote}{value}{quote}"
+    return value
+
+
 def write_env(path: Path, values: dict[str, str]) -> None:
     """Set these variables, keep every other line; readable by its owner only."""
-    lines = path.read_text(encoding="utf-8-sig").splitlines() if path.is_file() else HEADER.splitlines()
-    done: set[str] = set()
-    for index, line in enumerate(lines):
-        key = env_line_key(line)
-        if key in values:
-            lines[index] = f"{key}={values[key]}"
-            done.add(key)
-    lines += [f"{key}={value}" for key, value in values.items() if key not in done]
+    encoded = {key: env_value(value) for key, value in values.items()}
+    with _ENV_LOCK:
+        lines = path.read_text(encoding="utf-8-sig").splitlines() if path.is_file() else HEADER.splitlines()
+        done: set[str] = set()
+        for index, line in enumerate(lines):
+            key = env_line_key(line)
+            if key in encoded:
+                lines[index] = f"{key}={encoded[key]}"
+                done.add(key)
+        lines += [f"{key}={value}" for key, value in encoded.items() if key not in done]
+        write_private(path, "\n".join(lines) + "\n")
+
+
+def write_private(path: Path, text: str) -> None:
+    """Replace a file in one step (a fresh temporary file next to it), readable by its owner only."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write("\n".join(lines) + "\n")
-    os.replace(temporary, path)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
     try:
         path.chmod(0o600)
     except OSError:
