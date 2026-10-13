@@ -304,3 +304,52 @@ def test_a_rotated_log_stays_private(tmp_path, monkeypatch):
         assert oct(path.parent.stat().st_mode & 0o777) == "0o700"
     finally:
         os.umask(old)
+
+
+# ---- enriching: what is the athlete's, which activity, which second ----
+
+def test_a_value_typed_in_stays_a_placeholder_or_the_bridges_own_is_replaced():
+    from garmin_intervals_bridge.enrich import FieldMappings, ScalarMapping, plan_scalars
+    mappings = FieldMappings(scalars=[ScalarMapping("RecoveryTime", "mesg:140.9", (("/", 60.0),))])
+    original = {"140": [{9: 2160}]}                     # 36 h, as the device wrote it
+    partner = {"140": [{}]}                             # Garmin's copy lacks it
+    typed = plan_scalars(original, {"RecoveryTime": 24}, mappings, partner)
+    assert typed["writes"] == {} and typed["kept_existing"] == {"RecoveryTime": 24}
+    placeholder = plan_scalars(original, {"RecoveryTime": 0}, mappings, partner)
+    assert placeholder["writes"] == {"RecoveryTime": 36.0}
+    ours = plan_scalars(original, {"RecoveryTime": 0.6}, mappings, partner, own={"RecoveryTime": 0.6})
+    assert ours["writes"] == {"RecoveryTime": 36.0}    # the bridge's own (older units): put right
+
+
+def test_the_exact_activity_wins_and_two_lookalikes_are_no_match():
+    from garmin_intervals_bridge.enrich import match_activity
+    garmin = {"activityId": 42, "startTimeGMT": "2026-10-07 08:00:00", "duration": 3600}
+    near = {"id": "i1", "source": "GARMIN_CONNECT", "start_date": "2026-10-07T08:00:30Z"}       # no duration
+    exact = {"id": "i2", "source": "GARMIN_CONNECT", "external_id": "42", "start_date": "2026-10-07T09:00:00Z"}
+    assert match_activity(garmin, [near, exact])["id"] == "i2"
+    assert match_activity(garmin, [near]) is None                         # a duration is needed too
+    watch = {"id": "i3", "source": "GARMIN_CONNECT", "start_date": "2026-10-07T08:00:10Z", "moving_time": 3590}
+    edge = dict(watch, id="i4", start_date="2026-10-07T08:00:20Z")
+    assert match_activity(garmin, [watch]) == watch and match_activity(garmin, [watch, edge]) is None
+    other = dict(watch, id="i5", external_id="43")                        # names another recording
+    assert match_activity(garmin, [other]) is None
+
+
+def test_a_stream_is_not_written_when_its_second_cannot_be_checked():
+    from garmin_intervals_bridge.enrich import _starts_differ
+    ours = {"record": [{"timestamp": 1000}, {"timestamp": 1001}]}
+    assert not _starts_differ(ours, {"record": [{"timestamp": 1000}]})
+    assert _starts_differ(ours, {"record": [{"timestamp": 1005}]})
+    assert not _starts_differ(ours, {})                                   # nothing to compare with
+
+
+def test_a_long_running_bridge_sees_fields_added_since(monkeypatch):
+    from garmin_intervals_bridge.intervals import IntervalsClient
+    answers = [[{"type": "ACTIVITY_FIELD", "content": {"code": "A"}}],
+               [{"type": "ACTIVITY_FIELD", "content": {"code": "A"}}, {"type": "ACTIVITY_STREAM",
+                                                                       "content": {"code": "New"}}]]
+    client = IntervalsClient("k", "0")
+    monkeypatch.setattr(client, "_request", lambda *a, **k: answers.pop(0))
+    assert len(client.custom_items()) == 1 and len(client.custom_items()) == 1     # one request
+    client.forget_custom_items()                                           # a full run of `run`
+    assert len(client.custom_items()) == 2

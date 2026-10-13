@@ -559,13 +559,17 @@ def test_gap_runs_while_a_long_running_bridge_holds_every_lock(tmp_path, monkeyp
 
         def activity_file(self, iid):
             return b"partner"
+
+        def activity(self, iid):
+            return {"id": iid, "source": "GARMIN_CONNECT", "external_id": "42"}
     monkeypatch.setattr(cli, "GarminSource", FakeGarmin)
     monkeypatch.setattr(cli, "IntervalsClient", FakeIntervals)
     monkeypatch.setattr(cli, "extract_original_fit", lambda data: data)
     monkeypatch.setattr(cli, "gap_report", lambda original, partner: {"original": len(original)})
     with single_instance(tmp_path, ("activities", "wellness")):            # e.g. `run` in a container
         assert main(["gap", "--activity-id", "42", "--intervals-id", "i1"]) == 0
-    assert '"matched"' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert '"matched"' in out and "42.partner.fit" in out                  # exactly its copy: kept
 
 
 def test_login_works_next_to_a_running_bridge(tmp_path, monkeypatch):

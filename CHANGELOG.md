@@ -111,6 +111,22 @@ happened; all are closed:
     starting.
   - `BRIDGE_POLL_HOURS` is read strictly: `6:99` or `24-0` are errors, `22-24` works.
 - Log files stay readable by their owner only after a rotation too, in a private folder.
+- **Enriching:**
+  - A stream script counts only when it does nothing but copy one record field (scaled by
+    constants or not). Before, a script with a condition, a value changed before it is
+    written, or a second field was read as the plain form, and the stream got wrong values.
+  - Where the filtered copy lacks a field's source, only Intervals' `0` placeholder, or the
+    value the bridge itself wrote, is replaced. A value typed in by hand stays. Before, any
+    value was replaced, again whenever the field definitions changed.
+  - A long-running `run` reads the athlete's field definitions again for every full run, so
+    a newly added field or stream no longer waits for a restart.
+  - The activity whose external id names the Garmin activity wins, wherever it is in the
+    list. A look-alike counts only when start and duration agree and it is the only one;
+    two recordings of the same session, watch and Edge, are no match.
+  - `gap` keeps Intervals' copy for later enrichment only when it is exactly that
+    recording's.
+  - Streams are not written when nothing can check their alignment and the original starts
+    at another second than Intervals' copy.
 - Home Assistant app: taking over a copied data folder keeps the app's own form settings,
   whatever the folder brought along. The empty database of an earlier start is set aside
   (`bridge.db.before-takeover`) instead of deleted.

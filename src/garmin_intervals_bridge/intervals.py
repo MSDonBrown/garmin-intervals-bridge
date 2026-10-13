@@ -265,6 +265,10 @@ class IntervalsClient:
         return self._request("POST", "/events", json={"category": "NOTE", "start_date_local": f"{day}T00:00:00",
                                                       "name": name, "description": description})
 
+    def forget_custom_items(self) -> None:
+        """The athlete may have changed their fields since: ask again (a long-running `run`)."""
+        self._custom_items = None
+
     def custom_items(self) -> list[dict]:
         if self._custom_items is None:
             items = self._request("GET", "/custom-item")

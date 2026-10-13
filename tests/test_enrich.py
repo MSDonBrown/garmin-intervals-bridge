@@ -110,11 +110,11 @@ def test_mappings_come_from_the_athletes_own_definitions():
     assert by_code["VO2MaxGarmin"].convert == (("*", 3.5), ("/", 65536.0))
     assert "ActiveCalories" not in by_code            # computed by Intervals, not a FIT field
     assert m.unsupported["Weird"] == "script with unknown semantics"
-    assert m.unsupported["Battery"] == "stream script not limited to a single record field"
+    assert m.unsupported["Battery"] == "stream script does more than copy one record field"
     streams = {x.code: (x.record_field, x.convert) for x in m.streams}
     assert streams == {"Stamina": (138, ()), "GarminGCT": ("stance_time", ()),
                        "GarminGASpeed": (140, (("/", 1000.0),))}
-    assert m.unsupported["Odd"] == "stream script writes something other than the field value"
+    assert m.unsupported["Odd"] == "stream script does more than copy one record field"
 
 
 def test_scalar_plan_converts_and_never_overwrites_without_a_partner_copy():
@@ -229,3 +229,26 @@ def test_an_intervals_link_or_id_names_one_activity_and_its_garmin_original():
             return {"id": iid, "source": "STRAVA", "external_id": None}
     with pytest.raises(ValueError, match="did not come from Garmin"):
         resolve_one(Strava(), "i1")
+
+
+def test_a_stream_script_counts_only_when_it_copies_one_field_and_nothing_else():
+    def stream(script, **extra):
+        items = [{"type": "ACTIVITY_STREAM", "content": {"code": "S", "script": script, **extra}}]
+        m = load_field_mappings(items)
+        return (m.streams[0].record_field, m.streams[0].convert) if m.streams else m.unsupported.get("S")
+    plain = "{ for (let m of icu.fit.record) { let f = m.f_138; if (f) data.setAt(m.timestamp.value, f.value / 1000) } }"
+    assert stream(plain) == (138, (("/", 1000.0),))
+    assert stream(plain.replace("if (f) data", "if (f) { data").replace("/ 1000)", "/ 1000) }")) == (138, (("/", 1000.0),))
+    unknown = "stream script does more than copy one record field"
+    for script in (
+            # scaled before it is written: writing f.value raw would be wrong by 1000
+            "for (let m of icu.fit.record) { let f = m.f_138; f.value = f.value / 1000; "
+            "if (f) data.setAt(m.timestamp.value, f.value) }",
+            # a condition decides which values go in
+            "for (let m of icu.fit.record) { let f = m.f_138; if (f && f.value > 0 && f.value < 100) "
+            "data.setAt(m.timestamp.value, f.value) }",
+            # another field read first, its value written
+            "for (let m of icu.fit.record) { let g = m.f_137; let f = m.f_138; if (g) data.setAt(m.timestamp.value, "
+            "g.value) }"):
+        assert stream(script) == unknown, script
+    assert "not certain" in stream(plain, fit_record_field="stamina")          # a FIT field and a script

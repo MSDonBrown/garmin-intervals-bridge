@@ -20,7 +20,11 @@ and uses them exactly as Intervals does when it processes a file itself:
 
 Definitions the bridge cannot interpret safely (scripts over other
 messages, arithmetic beyond constant factors, fields computed from other
-fields) are reported as *unsupported* in every plan and never written.
+fields) are reported as *unsupported* in every plan and never written. A
+stream script counts only when it is exactly the form above: one record
+field, written at the record's time, as it is or multiplied/divided by
+constants – a condition, a value changed before it is written, a second field
+or a FIT field *and* a script make it unsupported.
 Select fields accept only their configured option values.
 
 Values are aligned to the activity's `time` stream by timestamp and refused
@@ -133,15 +137,18 @@ HR and HRV can stay ticked, they bring the night's values early.
 
 ## Notes on enrich mode
 
-- A value you typed by hand into a field whose FIT source Garmin filtered
-  out cannot be told apart from Intervals' own `0` placeholder for a missing
-  source, so the original's value replaces it. Fields whose source the
-  partner copy still carries are never changed.
+- Where Garmin filtered out a field's FIT source, Intervals stores `0`; the
+  bridge replaces that placeholder with the original's value, and its own
+  earlier value too when the original now says something else (a changed
+  conversion, say). Any other value there may be yours – typed in by hand – and
+  stays. Fields whose source the partner copy still carries are never changed.
 - Before a stream is written, the bridge aligns a stream both sides already
   have (heart rate, else cadence) the same way and compares it with what
   Intervals holds. A mismatch means the time origins differ; the streams are
-  then skipped and the journal says so. Activities without a shared stream
-  are written on the strength of the timestamp alignment alone.
+  then skipped and the journal says so. Without a shared stream, the streams
+  are written only when the original's first record and that of Intervals'
+  copy fall on the same second.
 - An activity enriched earlier is looked at again when the athlete's field
   definitions change (a new custom field or stream); only what is still
-  missing gets added.
+  missing gets added. A long-running `run` reads the definitions again for
+  every full run, so a new field needs no restart.

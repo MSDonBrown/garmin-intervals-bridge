@@ -28,12 +28,25 @@ DURATION_TOLERANCE = 0.05          # relative
 DURATION_TOLERANCE_SECONDS = 60    # absolute floor for short activities
 
 
+def exact_match(remote: list[dict], gid: str) -> dict | None:
+    """The Intervals activity whose external id names this Garmin activity; Garmin's own copy
+    first. A bare number is only Garmin's id when the official sync wrote it; `garmin:<id>`
+    and `<id>_ACTIVITY.fit` are specific enough on their own."""
+    named = [item for item in remote if isinstance(item, dict) and item.get("id")
+             and external_id_names(str(item.get("external_id") or ""), gid)
+             and (str(item.get("source") or "").upper() == "GARMIN_CONNECT"
+                  or not str(item.get("external_id") or "").isdecimal())]
+    named.sort(key=lambda item: str(item.get("source") or "").upper() != "GARMIN_CONNECT")
+    return named[0] if named else None
+
+
 def match_activity(garmin: dict, remote: list[dict]) -> dict | None:
     """Find the Intervals activity created by the official sync for this Garmin activity.
 
-    Accepts a remote activity when its external_id names the Garmin ID, or
-    when it comes from Garmin Connect and both start time and duration agree.
-    Returns None when nothing matches or when the inputs do not allow a safe
+    An external id naming the Garmin id wins, wherever it is in the list. Otherwise a copy
+    of the official sync without a Garmin id of its own whose start and duration both
+    agree – and only when exactly one does (two recordings of the same session, a watch
+    and an Edge, would agree too). Returns None when the inputs do not allow a safe
     decision; never guesses.
     """
     gid = str(garmin.get("activityId", ""))
@@ -41,31 +54,29 @@ def match_activity(garmin: dict, remote: list[dict]) -> dict | None:
     duration = garmin.get("duration")
     if not gid.isdecimal() or start is None:
         return None
+    exact = exact_match(remote, gid)
+    if exact is not None:
+        return exact
+    if not isinstance(duration, (int, float)):
+        return None
+    close = []
     for item in remote:
         if not isinstance(item, dict) or not item.get("id"):
             continue
-        source = str(item.get("source") or "").upper()
-        external = str(item.get("external_id") or "")
-        # A bare number is only Garmin's id when the official sync wrote it; `garmin:<id>` and
-        # `<id>_ACTIVITY.fit` are specific enough on their own.
-        if external_id_names(external, gid) and (source == "GARMIN_CONNECT" or not external.isdecimal()):
-            return item
-        if source != "GARMIN_CONNECT":
+        if str(item.get("source") or "").upper() != "GARMIN_CONNECT":
             continue
+        if garmin_id_from(item.get("external_id")) not in (None, gid):
+            continue                                   # it names its own recording, another one
         remote_start = parse_utc(item.get("start_date"))
-        if remote_start is None:
-            continue
-        if abs((remote_start - start).total_seconds()) > START_TOLERANCE_SECONDS:
+        if remote_start is None or abs((remote_start - start).total_seconds()) > START_TOLERANCE_SECONDS:
             continue
         # Garmin's `duration` is timer time: compare with moving and elapsed time, either may agree.
         remote_durations = [item.get(k) for k in ("moving_time", "elapsed_time")
                             if isinstance(item.get(k), (int, float))]
-        if isinstance(duration, (int, float)) and remote_durations:
-            allowed = max(DURATION_TOLERANCE_SECONDS, DURATION_TOLERANCE * float(duration))
-            if all(abs(float(r) - float(duration)) > allowed for r in remote_durations):
-                continue
-        return item
-    return None
+        allowed = max(DURATION_TOLERANCE_SECONDS, DURATION_TOLERANCE * float(duration))
+        if remote_durations and any(abs(float(r) - float(duration)) <= allowed for r in remote_durations):
+            close.append(item)
+    return close[0] if len(close) == 1 else None
 
 
 def _field_sets(messages: dict[str, list[dict]]) -> dict[str, set[str]]:
@@ -230,10 +241,16 @@ def mapping_signature(mappings: FieldMappings) -> str:
 
 _CONVERSION = re.compile(
     r"^\s*activity\.isNew\s*\?\s*activity\.(?P<code>\w+)(?P<ops>(\s*[*/]\s*[0-9.]+)*)\s*:\s*activity\.(?P=code)\s*$")
-_RECORD_SCRIPT = re.compile(r"icu\.fit\.record[\s\S]*?m\.f_(\d+)")
-# `data.setAt(<ts>, f.value / 1000)`: the value expression the script writes, if it is
-# the field value with optional multiplications/divisions by constants.
-_RECORD_VALUE = re.compile(r"setAt\(\s*[^,]+,\s*f\.value(?P<ops>(\s*[*/]\s*[0-9.]+)*)\s*\)")
+# The one stream script the bridge reproduces – every record's field, as it is or multiplied/divided
+# by constants, at the record's time; anything more (a condition, a computed value, a second field)
+# is the athlete's own logic and left to Intervals:
+#   { for (let m of icu.fit.record) { let f = m.f_138; if (f) data.setAt(m.timestamp.value, f.value / 1000) } }
+_RECORD_SCRIPT = re.compile(
+    r"\{?\s*for\s*\(\s*(?:let|const|var)\s+(?P<m>\w+)\s+of\s+icu\.fit\.record\s*\)\s*\{\s*"
+    r"(?:let|const|var)\s+(?P<f>\w+)\s*=\s*(?P=m)\.f_(?P<num>\d+)\s*;?\s*"
+    r"if\s*\(\s*(?P=f)\s*\)\s*(?P<brace>\{)?\s*data\.setAt\(\s*(?P=m)\.timestamp\.value\s*,\s*"
+    r"(?P=f)\.value(?P<ops>(?:\s*[*/]\s*[0-9.]+)*)\s*\)\s*;?\s*(?(brace)\}\s*)"
+    r"\}\s*;?\s*\}?\s*")
 
 
 def _parse_conversion(script: str | None, code: str) -> tuple[tuple, bool] | None:
@@ -304,22 +321,21 @@ def load_field_mappings(custom_items: list[dict]) -> FieldMappings:
             out.scalars.append(ScalarMapping(code, source, convert, select_values, zero_is_null))
         elif kind == "ACTIVITY_STREAM":
             src = content.get("fit_record_field")
+            script = str(content.get("script") or "").strip()
+            if src and script:
+                out.unsupported[code] = "a FIT field and a script: what Intervals makes of both is not certain"
+                continue
             if src:
                 src = str(src).strip()
                 out.streams.append(StreamMapping(code, int(src) if src.isdecimal() else src))
                 continue
-            script = content.get("script") or ""
-            m = _RECORD_SCRIPT.search(script)
-            if m and "_num" not in script:
-                value = _RECORD_VALUE.search(script)
-                if value is None:
-                    out.unsupported[code] = "stream script writes something other than the field value"
-                    continue
+            m = _RECORD_SCRIPT.fullmatch(script)
+            if m:
                 steps = tuple((op, float(factor)) for op, factor in
-                              re.findall(r"([*/])\s*([0-9.]+)", value.group("ops")))
-                out.streams.append(StreamMapping(code, int(m.group(1)), steps))
-            elif script.strip():
-                out.unsupported[code] = "stream script not limited to a single record field"
+                              re.findall(r"([*/])\s*([0-9.]+)", m.group("ops")))
+                out.streams.append(StreamMapping(code, int(m.group("num")), steps))
+            elif script:
+                out.unsupported[code] = "stream script does more than copy one record field"
     return out
 
 
@@ -355,16 +371,26 @@ def _same_value(existing: Any, value: Any) -> bool:
     return abs(float(existing) - float(value)) <= 1e-3 * max(1.0, abs(float(value)))
 
 
+def _placeholder(value: Any) -> bool:
+    """What Intervals stores for a field whose FIT source Garmin stripped: 0 (or NaN)."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value == 0 or value != value
+    return str(value).strip() in ("0", "0.0", "NaN")
+
+
 def plan_scalars(messages: dict[str, list[dict]], activity: dict, mappings: FieldMappings,
-                 partner_messages: dict[str, list[dict]] | None = None) -> dict:
+                 partner_messages: dict[str, list[dict]] | None = None, own: dict | None = None) -> dict:
     """Fields to PUT on the activity: mapped, present in the original, and either empty in
     Intervals or demonstrably filled from a filtered file.
 
     The second case matters: when Intervals evaluates a field whose FIT source
-    Garmin stripped, it may store 0 rather than null. A value that exists in
-    Intervals while its source is absent from the partner copy cannot have come
-    from real data, so it is replaced. Without a partner copy, existing values
-    are left alone.
+    Garmin stripped, it stores 0 rather than null. Such a 0, while the source is
+    absent from the partner copy, cannot have come from real data, so it is
+    replaced – and so is the value the bridge itself wrote last time (`own`), when
+    the original now says something else. Any other value may be the athlete's own
+    and stays; without a partner copy, existing values are left alone.
     """
     writes: dict[str, Any] = {}
     kept: dict[str, Any] = {}
@@ -388,8 +414,9 @@ def plan_scalars(messages: dict[str, list[dict]], activity: dict, mappings: Fiel
             continue
         if existing is not None:
             source_in_partner = partner_messages is not None and _lookup(partner_messages, m.source) is not None
-            if partner_messages is None or source_in_partner:
-                kept[m.code] = existing          # may be real data: never overwrite
+            ours = own is not None and m.code in own and _same_value(existing, own[m.code])
+            if partner_messages is None or source_in_partner or not (_placeholder(existing) or ours):
+                kept[m.code] = existing          # may be real data, or typed in: never overwrite
                 continue
             replaced[m.code] = {"old": existing, "new": value}
         writes[m.code] = value
@@ -419,6 +446,14 @@ def align_stream(records: list[dict], time_stream: list, record_field: str | int
 # A stream both sides carry, to prove the alignment before anything is written:
 # (field in the original's record messages, Intervals stream type, tolerated difference).
 _ORIGIN_PAIRS = (("heart_rate", "heartrate", 2), ("cadence", "cadence", 3))
+
+
+def _starts_differ(messages: dict, partner_messages: dict) -> bool:
+    """The original's first record at another second than the first record of Intervals' copy."""
+    def first(items: list[dict]) -> float | None:
+        return next((r["timestamp"] for r in items if isinstance(r.get("timestamp"), (int, float))), None)
+    ours, theirs = first(messages.get("record", [])), first(partner_messages.get("record", []))
+    return ours is not None and theirs is not None and abs(ours - theirs) >= 1
 
 
 def origin_check(records: list[dict], time_stream: list, remote_streams: list[dict]) -> dict:
@@ -509,6 +544,9 @@ def resolve_one(intervals: Any, reference: str) -> tuple[str, str]:
     return garmin_id, intervals_id
 
 
+OWN_KEY = "enrich:written:"          # + Garmin id: the field values the bridge wrote, to tell them from typed ones
+
+
 def enrich_activity(gid: str, garmin: Any, intervals: Any, store: Any, *, apply: bool,
                     remote_candidates: list[dict] | None = None, intervals_id: str | None = None,
                     mappings: FieldMappings | None = None, refresh_own: bool = False,
@@ -545,7 +583,7 @@ def enrich_activity(gid: str, garmin: Any, intervals: Any, store: Any, *, apply:
             remote_candidates = intervals.activities(day.date() - timedelta(days=1), day.date() + timedelta(days=1))
             found = match_activity(activity, remote_candidates)
         else:
-            found = next((c for c in remote_candidates if external_id_names(c.get("external_id"), gid)), None)
+            found = exact_match(remote_candidates, gid)
         if found is None:
             return {"activity_id": gid, "outcome": "unmatched", "candidates_seen": len(remote_candidates)}
         intervals_id = str(found["id"])
@@ -574,7 +612,9 @@ def enrich_activity(gid: str, garmin: Any, intervals: Any, store: Any, *, apply:
     # only into the activity they went to: after a swap Intervals computes them from the original
     refresh = (set(previous["streams"]) if (refresh_own and previous and previous["intervals_id"] == intervals_id)
                else None)
-    scalars = plan_scalars(messages, remote, mappings, partner_messages)
+    same = bool(previous) and previous["intervals_id"] == intervals_id
+    own = json.loads(store.get_meta(OWN_KEY + gid) or "{}") if same else {}     # what the bridge wrote there
+    scalars = plan_scalars(messages, remote, mappings, partner_messages, own=own)
     streams = plan_streams(messages, remote, time_stream, mappings, refresh=refresh)
     check = origin_check(messages.get("record", []), time_stream, remote_streams)
     if streams["writes"] and check["ok"] is False:
@@ -582,6 +622,13 @@ def enrich_activity(gid: str, garmin: Any, intervals: Any, store: Any, *, apply:
         # Intervals already has. Scalars are unaffected.
         log.warning("Activity %s: stream alignment check failed (%s), streams not written", gid, check)
         reason = f"alignment check failed on {check['stream']}"
+        streams["skipped"].update({w["type"]: reason for w in streams["writes"]})
+        streams["writes"] = []
+    elif streams["writes"] and check["ok"] is None and _starts_differ(messages, partner_messages):
+        # nothing to check the alignment with, and Intervals' copy starts elsewhere: a shift is possible
+        log.warning("Activity %s: streams not written – no shared stream to check their alignment, and the "
+                    "original starts at another second than Intervals' copy", gid)
+        reason = "alignment cannot be checked: the recordings start differently"
         streams["skipped"].update({w["type"]: reason for w in streams["writes"]})
         streams["writes"] = []
     streams["origin_check"] = check
@@ -605,6 +652,7 @@ def enrich_activity(gid: str, garmin: Any, intervals: Any, store: Any, *, apply:
     result: dict = {}
     if scalars["writes"]:
         result["fields"] = intervals.update_activity(intervals_id, scalars["writes"]) is not None
+        store.set_meta(OWN_KEY + gid, json.dumps({**own, **scalars["writes"]}, sort_keys=True, default=str))
     if streams["writes"]:
         body = [{k: v for k, v in w.items() if k != "_stats"} for w in streams["writes"]]
         result["streams"] = intervals.put_streams(intervals_id, body)

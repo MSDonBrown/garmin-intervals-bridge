@@ -16,7 +16,7 @@ from .backup import backup_once, backup_range
 from .backup import describe as describe_backup
 from .charts import setup_charts
 from .config import Settings, configured_log_file
-from .enrich import enrich_activity, gap_report, intervals_id_from, match_activity, resolve_one
+from .enrich import enrich_activity, exact_match, gap_report, intervals_id_from, match_activity, resolve_one
 from .fit import compare_fit, extract_original_fit, sha256
 from .garmin import DAY_ENDPOINTS, GarminBlocked, GarminLoginNeeded, GarminSource, parse_endpoints
 from .gear import SensorCache as GearSensors
@@ -284,6 +284,8 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 pass                                    # Intervals asked for a break (429): nothing at all
             elif now >= next_sync:
                 garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
+                if hasattr(intervals, "forget_custom_items"):
+                    intervals.forget_custom_items()      # fields added since: seen by this full run
                 results: dict = {"apply": apply, "scope": "all", "mode": mode}
                 if mode == "upload":
                     results["activities"] = sync_activities(settings, garmin, intervals, store, apply=apply,
@@ -684,6 +686,7 @@ def main(argv: list[str] | None = None) -> int:
                     original = path.read_bytes()
                     if args.intervals_id:
                         remote_id = args.intervals_id
+                        found = intervals.activity(remote_id)
                         matched = {"id": remote_id, "how": "given"}
                     else:
                         activity = garmin.activity(gid)
@@ -699,9 +702,11 @@ def main(argv: list[str] | None = None) -> int:
                         matched = {"id": remote_id, "how": "matched", "source": found.get("source"),
                                    "external_id": found.get("external_id"), "start_date": found.get("start_date")}
                     partner = extract_original_fit(intervals.activity_file(remote_id))
-                    store.atomic_save(store.partner_path(gid), partner)
+                    kept = exact_match([found], gid) is not None      # only the copy of exactly this recording
+                    if kept:                                          # serves the enrichment later
+                        store.atomic_save(store.partner_path(gid), partner)
                     print(json.dumps({"activity_id": gid, "matched": matched,
-                                      "partner_file": str(store.partner_path(gid)),
+                                      "partner_file": str(store.partner_path(gid)) if kept else None,
                                       "report": gap_report(original, partner)}, indent=2, default=str))
                     return 0
                 if args.cmd == "enrich":
