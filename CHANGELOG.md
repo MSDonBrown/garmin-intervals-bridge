@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 — 2026-10-13
 
-Fewer requests for Intervals.icu, and a button to look now.
+Fewer requests for Intervals.icu, a button to look now – and a second review of the whole
+code, every finding fixed.
 
 Upgrading needs no change. systemd users: the `watch` command now decides itself when a look
 is due, so the shipped watch timer starts it every minute again (copy it to take that over).
