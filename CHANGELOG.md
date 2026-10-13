@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.11.1 — unreleased
+
+Contributions, and a container that says whether the bridge works.
+
+### Added
+
+- **The container image checks itself** every 5 minutes (`status --check`, no request to
+  anyone): Docker, Portainer, Unraid and Synology show it *unhealthy* when no run came for
+  twice the expected time (about an hour; backup mode: twice `BRIDGE_BACKUP_HOURS`). A break
+  Intervals asked for, and a Garmin sign-in it waits for, count as healthy – a restart would
+  not help there, and the alerts tell you. The Home Assistant app leaves it out (Home
+  Assistant watches its apps itself). Thanks @FrancescoCastaldi for the idea.
+- The whole test suite runs on Windows and macOS too (thanks @FrancescoCastaldi).
+- The package says its type hints count (PEP 561 `py.typed`; thanks @FrancescoCastaldi).
+
+### Fixed
+
+Thanks @FrancescoCastaldi for each of these:
+
+- A setting left empty (`BRIDGE_ACTIVITY_LOOKBACK_DAYS=`) means its default. Before, it
+  stopped the bridge.
+- A push message's title is one line: a line break in it made the push fail. The ntfy
+  address and token may carry stray spaces.
+- A FIT file may not declare more than 32 MB.
+
 ## 0.11.0 — 2026-10-13
 
 Fewer requests for Intervals.icu, a button to look now – and a second review of the whole

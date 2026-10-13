@@ -192,7 +192,11 @@ def test_more_connections_than_allowed_are_closed_not_served(env, monkeypatch): 
         extra = socket.create_connection(("127.0.0.1", ui.port))
         extra.settimeout(2)
         extra.sendall(b"GET / HTTP/1.0\r\n\r\n")
-        assert extra.recv(100) == b""                                       # closed at once
+        try:
+            answer = extra.recv(100)
+        except ConnectionResetError:                                       # macOS says so instead
+            answer = b""
+        assert answer == b""                                               # closed at once, not served
         extra.close()
         time.sleep(3.5)                                                    # the idle ones time out ...
         assert call(ui, "GET", "/")[0] in (303, 403)                        # ... and the page answers again
@@ -355,3 +359,53 @@ def test_a_long_running_bridge_sees_fields_added_since(monkeypatch):
     assert len(client.custom_items()) == 1 and len(client.custom_items()) == 1     # one request
     client.forget_custom_items()                                           # a full run of `run`
     assert len(client.custom_items()) == 2
+
+
+# ---- the container's healthcheck ----
+
+def test_the_healthcheck_says_unhealthy_only_when_runs_stopped(tmp_path):
+    from garmin_intervals_bridge import notices
+    now = 1_800_000_000.0
+    settings = SimpleNamespace(token_dir=tmp_path / "tokens", mode="enrich", backup_hours=12)
+    st = Store(tmp_path)
+    assert health.liveness(settings, st, now=now) == (True, "waiting for a Garmin sign-in (the web page, `login`)")
+    (tmp_path / "tokens").mkdir()
+    (tmp_path / "tokens" / "garmin_tokens.json").write_text("{}")
+    assert health.liveness(settings, st, now=now) == (True, "no run finished yet")
+    st.record_run("sync", {}, started=now - 50 * 60)
+    assert health.liveness(settings, st, now=now)[0]                       # a full run 50 minutes ago
+    st.record_run("watch", {}, started=now - 80 * 60)
+    ok, why = health.liveness(settings, st, now=now + 20 * 60)
+    assert not ok and why.startswith("no run for 70 minutes")              # stopped: unhealthy
+    st.set_meta(notices.WAITING_KEY, "2026-10-13")                       # ... unless a sign-in is due
+    assert health.liveness(settings, st, now=now + 20 * 60)[0]
+    st.set_meta(notices.WAITING_KEY, "")
+    st.set_meta(polling.PAUSE_KEY, f"{now + 3600:.0f}")                   # ... or Intervals asked for a break
+    assert health.liveness(settings, st, now=now + 20 * 60) == (True, "paused at Intervals.icu's request")
+    backup = SimpleNamespace(token_dir=tmp_path / "tokens", mode="backup", backup_hours=12)
+    st.record_run("backup", {}, started=now - 20 * 3600)
+    assert health.liveness(backup, st, now=now)[0]                         # every 12 h: 20 h is fine
+    st.close()
+
+
+def test_status_check_exits_1_when_the_bridge_stopped(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("BRIDGE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("GARMIN_TOKEN_DIR", str(tmp_path / "tokens"))
+    (tmp_path / "tokens").mkdir()
+    (tmp_path / "tokens" / "garmin_tokens.json").write_text("{}")
+    st = Store(tmp_path)
+    st.record_run("sync", {}, started=time.time() - 3 * 3600)
+    st.close()
+    assert cli.main(["status", "--check"]) == 1 and "unhealthy: no run for 180 minutes" in capsys.readouterr().out
+    st = Store(tmp_path)
+    st.record_run("watch", {})
+    st.close()
+    assert cli.main(["status", "--check"]) == 0 and capsys.readouterr().out.startswith("healthy")
+
+
+def test_the_image_checks_itself_and_the_home_assistant_app_does_not():
+    from pathlib import Path
+    root = Path(__file__).parents[1]
+    assert '"status", "--check"' in (root / "Dockerfile").read_text()
+    assert "--interval=5m" in (root / "Dockerfile").read_text()
+    assert "HEALTHCHECK NONE" in (root / "home-assistant" / "Dockerfile").read_text()

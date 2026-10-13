@@ -27,7 +27,7 @@ from .gear import refresh_totals as refresh_gear_totals
 from .gear import report as gear_report
 from .gear import save_config as save_gear_config
 from .gear import sync_recent as sync_gear_recent
-from .health import probe
+from .health import liveness, probe
 from .intervals import IntervalsClient, rate_limited
 from .store import InstanceBusy, Store, single_instance
 from .sync import (
@@ -224,7 +224,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Create the two fields if missing and write days whose HRVTrendAdvice is empty")
     trend.add_argument("--overwrite", action="store_true", help="Also replace existing HRVTrendAdvice values")
     trend.add_argument("--details", action="store_true", help="With --compare: list every day too")
-    sub.add_parser("status", help="Show pending uploads requiring manual reconciliation")
+    status = sub.add_parser("status", help="Show pending uploads requiring manual reconciliation")
+    status.add_argument("--check", action="store_true",
+                        help="Exit 1 when the bridge has stopped working (no run for twice the expected time) – "
+                             "a container's healthcheck; no request to anyone")
     account = sub.add_parser("snapshot-account", help="Archive what is not a time series: profile, settings, "
                                                       "devices, zones, gear, personal records, badges, workouts, "
                                                       "training plans, goals, the calendar, FTP and running "
@@ -596,6 +599,10 @@ def main(argv: list[str] | None = None) -> int:
         with locks:
             store = Store(settings.data_dir)
             try:
+                if args.cmd == "status" and args.check:
+                    ok, why = liveness(settings, store)
+                    print(("healthy: " if ok else "unhealthy: ") + why)
+                    return 0 if ok else 1
                 if args.cmd == "status":
                     print(json.dumps({"pending_garmin_activity_ids": store.pending_activities(),
                                       "failed_activities": store.failed_activities()}, indent=2))

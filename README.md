@@ -181,7 +181,7 @@ run is exactly what `--apply` would send.
 | `imready4 [--date D \| --from D [--to D]] [--compare] [--apply] [--overwrite]` | ImReady4-compatible training advice into `TrainingAdvice`: preview, comparison with existing values, filling the past; see [Training advice](#training-advice-imready4). |
 | `hrvtrend [--date D \| --from D [--to D]] [--compare] [--apply] [--overwrite]` | Experimental trend advice into its own field `HRVTrendAdvice`, compared with ImReady4's; see [docs/HRV_TREND.md](docs/HRV_TREND.md). |
 | `run [--apply] [--mode …] [--poll-seconds N] [--sync-minutes N]` | Keep running in one process: a poll every 5 minutes (see [How often it looks](#how-often-it-looks)), a full run every 30 minutes, the daily health check (what autostart, the containers and the Home Assistant app start). See [Running it](#running-it). |
-| `status` | Pending uploads and failed activities with their retry time. |
+| `status [--check]` | Pending uploads and failed activities with their retry time. `--check`: exit 1 when the bridge has stopped working – no run for twice the expected time (the container image's healthcheck). |
 | `reset-pending --activity-id <garmin id>` | Upload mode: clear a pending upload after you checked Intervals by hand. |
 | `snapshot-account [--history-from DATE]` | Archive what is not a time series: profile, settings, devices, zones, gear, records, badges, workouts, plans, the calendar. |
 | `health` | Daily digest: probes both services and reports errors that would otherwise stay silent (dead timers, endpoints failing for days, fields Garmin stopped delivering, activities failing repeatedly). Exit 2 only when a human is needed. |
@@ -478,7 +478,11 @@ keeps only Garmin's session tokens in the mounted `data/` volume
 other command just uses those tokens. If Garmin answers the login with
 429, wait an hour and try again.
 
-The compose service runs `run` and restarts with the machine. Prefer cron? Leave
+The compose service runs `run` and restarts with the machine. The image checks itself every 5
+minutes (`status --check`, no request to anyone): `docker ps`, Portainer, Unraid or Synology
+show the container as *unhealthy* when no run came for about an hour – not during a break
+Intervals asked for, nor while it waits for a Garmin sign-in (the alerts tell you about that).
+Prefer cron? Leave
 the service stopped and schedule `docker compose run --rm -T bridge watch --apply`
 every 5 minutes and `... sync --apply` every 30 minutes instead.
 

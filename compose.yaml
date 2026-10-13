@@ -31,3 +31,5 @@ services:
     # `... sync --apply` every 30 minutes; leave the service itself stopped then.)
     restart: unless-stopped
     command: ["run"]
+    # The image checks itself every 5 minutes (`status --check`, no request): `docker ps` and
+    # Portainer, Unraid or Synology show healthy/unhealthy – unhealthy when no run came for an hour.

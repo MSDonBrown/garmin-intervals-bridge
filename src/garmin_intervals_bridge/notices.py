@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 PYPI_URL = "https://pypi.org/pypi/garmin-intervals-bridge/json"
 LOGIN_NOTE_KEY = "notice:garmin_login"
+WAITING_KEY = "notice:garmin_sign_in_due"    # Garmin wants a new sign-in: set until it answers again
 # Set by the web page after a Garmin sign-in: a `run` waiting for one goes on at once.
 SIGNED_IN = threading.Event()
 LOGIN_NOTE_NAME = "Garmin bridge: Garmin login needed"
@@ -69,6 +70,8 @@ def update_finding(settings: Any, *, in_container: bool, session: Any = None) ->
 def login_needed(settings: Any, store: Any, intervals: Any, today: date, *, apply: bool) -> bool:
     """Tell the owner once per episode: an e-mail / push message (when set up), and the note in
     the calendar (a bridge that may write); True when the note was written."""
+    if not store.get_meta(WAITING_KEY):
+        store.set_meta(WAITING_KEY, str(today or "yes"))
     alerts.login_needed(settings, store)
     if not apply or not getattr(settings, "intervals_notes", False) or intervals is None:
         return False
@@ -88,6 +91,6 @@ def login_needed(settings: Any, store: Any, intervals: Any, today: date, *, appl
 def garmin_ok(store: Any) -> None:
     """Garmin answered: the episode is over, the next expiry gets its own note."""
     store.set_meta("garmin_last_ok")
-    for key in (LOGIN_NOTE_KEY, alerts.LOGIN_KEY):
+    for key in (LOGIN_NOTE_KEY, alerts.LOGIN_KEY, WAITING_KEY):
         if store.get_meta(key):
             store.set_meta(key, "")

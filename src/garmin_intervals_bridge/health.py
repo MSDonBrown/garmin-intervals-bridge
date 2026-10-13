@@ -28,6 +28,7 @@ import logging
 import os
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from . import alerts, notices
@@ -116,6 +117,32 @@ def _watch_stale_hours(settings: Any, now: float) -> float | None:
         if not all(within_hours(datetime.fromtimestamp(now - 900 * n, tz), ranges) for n in range(steps)):
             return None
     return hours
+
+
+FULL_RUN_MINUTES = 30            # `run`'s full runs (and the systemd timer's)
+
+
+def liveness(settings: Any, store: Any, *, now: float | None = None) -> tuple[bool, str]:
+    """Does the bridge still work? For a container's healthcheck (`status --check`), without a
+    request: a run recorded within twice the time it takes between two – the full runs come
+    every 30 minutes whatever the poll plan (backup mode: every BRIDGE_BACKUP_HOURS). A break
+    Intervals asked for, a Garmin sign-in it waits for (a restart would not help) and a bridge
+    that has not finished its first run yet all count as working."""
+    now = now or time.time()
+    if float(store.get_meta("intervals:paused_until") or 0) > now:
+        return True, "paused at Intervals.icu's request"
+    if store.get_meta(notices.WAITING_KEY) or not any(Path(settings.token_dir).glob("*.json")):
+        return True, "waiting for a Garmin sign-in (the web page, `login`)"
+    runs = {c: store.last_run(c) for c in ("sync", "watch", "backup")}
+    backup_mode = getattr(settings, "mode", "enrich") == "backup"
+    last = runs["backup"] if backup_mode else max((t for t in (runs["sync"], runs["watch"]) if t), default=None)
+    if last is None:
+        return True, "no run finished yet"
+    limit = 2 * (getattr(settings, "backup_hours", 12) * 3600 if backup_mode else FULL_RUN_MINUTES * 60) + 300
+    age = now - last
+    if age > limit:
+        return False, f"no run for {age / 60:.0f} minutes (expected within {limit / 60:.0f})"
+    return True, f"last run {age / 60:.0f} minutes ago"
 
 
 def silent_error_checks(settings: Any, store: Any, *, now: float | None = None) -> list[dict]:
