@@ -117,3 +117,23 @@ def test_chained_fit_files_are_valid_and_decoded_together():
     assert len(messages["record"]) == 5
     with pytest.raises(InvalidFIT):
         validate_fit(one + b"garbage")            # trailing bytes that are not a FIT file
+
+
+def test_an_empty_or_oversized_download_is_no_fit(monkeypatch):
+    from garmin_intervals_bridge import fit
+    with pytest.raises(fit.InvalidFIT, match="Empty"):
+        fit.extract_original_fit(b"")
+    monkeypatch.setattr(fit, "MAX_FIT_BYTES", 10)
+    with pytest.raises(fit.InvalidFIT, match="large"):
+        fit.extract_original_fit(build_fit(records=3))
+
+
+def test_the_crc_is_checked_once(monkeypatch):
+    from garmin_intervals_bridge import fit
+    checks = []
+    real = fit.validate_fit
+    monkeypatch.setattr(fit, "validate_fit", lambda data: checks.append(1) or real(data))
+    data = build_fit(records=3)
+    fit.decode_fit(data)
+    fit.decode_fit(data, checked=True)                      # just downloaded: checked there
+    assert checks == [1]

@@ -30,6 +30,42 @@ To keep looking every minute: `BRIDGE_POLL_SECONDS=60`.
 
 - `watch` (the systemd timer's command) keeps to `BRIDGE_POLL_SECONDS` like `run` does,
   5 minutes by default; a `watch` that is not due ends at once, without a request.
+- Each FIT file's CRC is checked once instead of three times: about 40 % less CPU per new
+  activity, nothing skipped (noticeable on a Raspberry Pi; thanks @Michael.0000).
+
+### Fixed
+
+A second review of the whole code (an independent AI review, each finding checked against
+the code and reproduced) found ways a rare failure could cost data. None is known to have
+happened; all are closed:
+
+- **Swap mode:**
+  - Garmin's copy is deleted only once the athlete's values (RPE, notes, typed fields …)
+    read back from the original. Before, a failed transfer still deleted the copy.
+  - The comments are asked again right before every delete, and a delete tried again later
+    happens only while Intervals still lists both the copy and the original. Before, a retry
+    could delete a copy that had got a comment, or one whose original had been deleted by hand.
+  - An upload whose answer got lost is never sent again; an original uploaded before is
+    taken up instead of uploaded twice.
+  - Automatic swaps leave copies alone whose intervals count as edited (`swap <id> --apply`
+    still does it, with a note).
+  - A typed 0 goes over. Fields Intervals computes from the file keep the original's value
+    instead of the copy's filtered one.
+  - One swap at a time: the watch, the full runs and `swap` by hand share a lock.
+  - A workout not paired again is tried again.
+- **Wellness:**
+  - A read in which one Garmin endpoint failed keeps what the archive had for it. Before,
+    it replaced the archive.
+  - A day with such a passing failure is final only after three reads.
+  - A write to Intervals that failed is tried again, the evening's corrections included.
+    Before, a day written in the morning was never written again.
+  - A Health Snapshot check that failed is done again.
+- **Backup mode:**
+  - The day's original files are asked again after an error, and once more when Garmin said
+    "none" before a late watch sync.
+  - A read with failed endpoints counts only once they came.
+- An empty FIT download is refused (before, it counted as the original and the activity as
+  done for good), and the size limit holds for plain FIT downloads too.
 
 ## 0.10.3 — 2026-10-13
 

@@ -321,3 +321,76 @@ def test_this_mornings_recovery_is_replaced_by_the_evenings_at_the_final_read(tm
     assert i.records[TODAY]["GarminAcuteLoad"] == 640 and i.records[TODAY]["GarminRecoveryTimeHours"] == 48.3
     assert i.records[TODAY]["GarminTrainingReadiness"] == 77   # the morning's readiness stays
     st.close()
+
+
+# ---- what a failure must not cost (second review) ----
+
+TOMORROW = TODAY + timedelta(days=1)
+
+
+def _morning_written(tmp_path):
+    st, g, i = fresh(tmp_path)
+    g.sleep = g.readiness = True
+    i.records[TODAY] = {"sleepSecs": 28080}
+    run(tmp_path, st, g, i, at(8, 0))
+    return st, g, i
+
+
+def test_a_failed_endpoint_in_the_final_read_keeps_the_archive_and_reads_again(tmp_path):
+    st, g, i = _morning_written(tmp_path)
+    assert st.load_snapshot(TODAY)["data"]["hrv"]
+    real = g.snapshot
+
+    def flaky(day, endpoints=None):
+        raw = real(day, endpoints)
+        if endpoints is None and day == TODAY:
+            raw["data"].pop("hrv", None)
+            raw["errors"]["hrv"] = "GarminConnectConnectionError 503"
+        return raw
+    g.snapshot = flaky
+    i.records[TOMORROW] = {"sleepSecs": 27000}
+    run(tmp_path, st, g, i, at(7, 30, day=TOMORROW))
+    assert st.load_snapshot(TODAY)["data"]["hrv"]                      # the morning's HRV stays
+    assert st.get_meta(f"wellness:final:{TODAY}") is None              # not final on a passing failure
+    for hour in (9, 12, 16, 21):
+        run(tmp_path, st, g, i, at(hour, 0, day=TOMORROW))
+    finals = [r for r in g.reads if r == (TODAY, None)]
+    assert len(finals) == 3 and st.get_meta(f"wellness:final:{TODAY}")   # three tries, then final anyway
+    st.close()
+
+
+def test_a_final_write_that_failed_is_written_again_with_the_evening_values(tmp_path):
+    st, g, i = _morning_written(tmp_path)
+    real = i.write_wellness
+    failing = {"on": True}
+
+    def write(day, changes):
+        if failing["on"] and day == TODAY:
+            raise RuntimeError("HTTP 502")
+        return real(day, changes)
+    i.write_wellness = write
+    i.records[TOMORROW] = {"sleepSecs": 27000}
+    run(tmp_path, st, g, i, at(7, 30, day=TOMORROW))
+    assert st.get_meta(f"wellness:final:{TODAY}") and st.wellness_state(TODAY)[1] is None
+    failing["on"] = False
+    run(tmp_path, st, g, i, at(8, 0, day=TOMORROW))
+    assert i.records[TODAY].get("steps") and st.wellness_state(TODAY)[1]     # the day's totals arrived
+    assert not st.get_meta(f"wellness:rewrite:{TODAY}")
+    st.close()
+
+
+def test_a_health_snapshot_check_that_failed_is_done_again(tmp_path):
+    st, g, i = _morning_written(tmp_path)
+    i.records[TODAY]["hrv"] = 55                                         # a snapshot moved Intervals' HRV
+    asked = []
+
+    def broken(day):
+        asked.append(day)
+        raise ConnectionError("reset")
+    g.wellness_files = broken
+    run(tmp_path, st, g, i, at(10, 0))                                   # does not end the run
+    assert st.get_meta(f"wellness:snapshot:{TODAY}") is None
+    g.wellness_files = lambda day: asked.append(day) or None
+    run(tmp_path, st, g, i, at(10, 30))
+    assert len(asked) == 2 and st.get_meta(f"wellness:snapshot:{TODAY}") == "55"
+    st.close()

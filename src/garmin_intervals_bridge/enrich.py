@@ -529,7 +529,8 @@ def enrich_activity(gid: str, garmin: Any, intervals: Any, store: Any, *, apply:
     from .fit import decode_fit, extract_original_fit, sha256  # local import keeps fit optional for tests
 
     path = store.fit_path(gid)
-    if not path.is_file():
+    downloaded = not path.is_file()                 # checked on download (CRC): not again below
+    if downloaded:
         store.atomic_save(path, garmin.original_fit(gid))
     original = path.read_bytes()
     digest = sha256(original)
@@ -562,10 +563,11 @@ def enrich_activity(gid: str, garmin: Any, intervals: Any, store: Any, *, apply:
     partner_file = store.partner_path(gid)
     if previous and previous["intervals_id"] != intervals_id and partner_file.is_file():
         partner_file.unlink()           # the Intervals activity was replaced: its copy is stale
-    if not partner_file.is_file():
+    partner_downloaded = not partner_file.is_file()
+    if partner_downloaded:
         store.atomic_save(partner_file, extract_original_fit(intervals.activity_file(intervals_id)))
-    messages, _ = decode_fit(original)
-    partner_messages, _ = decode_fit(partner_file.read_bytes())
+    messages, _ = decode_fit(original, checked=downloaded)
+    partner_messages, _ = decode_fit(partner_file.read_bytes(), checked=partner_downloaded)
     remote_streams = intervals.streams(intervals_id, ["time", "heartrate", "cadence"])
     time_stream = next((st.get("data") for st in remote_streams
                         if isinstance(st, dict) and st.get("type") == "time"), []) or []

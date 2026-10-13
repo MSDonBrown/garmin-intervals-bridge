@@ -1,5 +1,5 @@
 """Backup mode: Garmin into the data folder, kindly, without Intervals."""
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -148,4 +148,68 @@ def test_a_backup_counts_as_stopped_only_after_two_missed_runs(tmp_path):
     st.db.execute("UPDATE runs SET started = started - 10 * 3600")
     st.db.commit()
     assert [f["what"] for f in silent_error_checks(s, st) if f["alert"]] == ["backup not running"]
+    st.close()
+
+
+class _FlakyGarmin:
+    """Garmin for the backup: HRV fails with a 503 when asked to, the day's files fail or come late."""
+
+    def __init__(self):
+        self.fail_hrv, self.files_error, self.files_answer, self.files_asked = False, None, None, []
+
+    def activities(self, start, end):
+        return []
+
+    def snapshot(self, day, endpoints=None):
+        data, errors = {"stats": {"totalSteps": 9000}}, {}
+        if self.fail_hrv:
+            errors["hrv"] = "GarminConnectConnectionError 503"
+        else:
+            data["hrv"] = {"hrvSummary": {"lastNightAvg": 40}}
+        return {"date": day.isoformat(), "data": data, "errors": errors}
+
+    def wellness_files(self, day):
+        self.files_asked.append(day)
+        if self.files_error:
+            raise self.files_error
+        return self.files_answer
+
+    def account_snapshot(self, **k):
+        return {"data": {}, "errors": {}}
+
+
+def test_a_failed_endpoint_keeps_the_archive_and_the_read_counts_only_once_it_came(tmp_path):
+    st, g = Store(tmp_path), _FlakyGarmin()
+    day, vienna = date(2026, 10, 5), ZoneInfo("Europe/Vienna")
+    settings = SimpleNamespace(timezone=vienna)
+    backup.backup_once(settings, g, st, now=datetime(2026, 10, 6, 13, 0, tzinfo=vienna))
+    assert st.get_meta(backup.READS_KEY + str(day)).startswith("1@")
+    g.fail_hrv = True
+    late = datetime(2026, 10, 8, 13, 0, tzinfo=vienna)
+    metrics = backup.backup_once(settings, g, st, now=late)
+    assert st.load_snapshot(day)["data"]["hrv"] and metrics["failed"] >= 1
+    assert st.get_meta(backup.READS_KEY + str(day)).startswith("1@")          # the late read is still due
+    g.fail_hrv = False
+    backup.backup_once(settings, g, st, now=late + timedelta(hours=12))
+    assert st.get_meta(backup.READS_KEY + str(day)).startswith("2@")
+    st.close()
+
+
+def test_the_days_files_are_asked_again_after_an_error_and_after_an_early_none(tmp_path):
+    from garmin_intervals_bridge.sync import files_missing
+    st, g = Store(tmp_path), _FlakyGarmin()
+    day, vienna = date(2026, 10, 5), ZoneInfo("Europe/Vienna")
+    settings = SimpleNamespace(timezone=vienna)
+    g.files_error = ConnectionError("reset")
+    metrics = backup.backup_once(settings, g, st, now=datetime(2026, 10, 6, 13, 0, tzinfo=vienna))
+    assert metrics["failed"] >= 1 and day in g.files_asked and st.load_wellness_index(day) is None
+    g.files_error = None                                                  # Garmin: "no files" (too early)
+    backup.backup_once(settings, g, st, now=datetime(2026, 10, 7, 1, 0, tzinfo=vienna))
+    assert g.files_asked.count(day) == 2 and st.load_wellness_index(day)["files"] == 0
+    early = {**st.load_wellness_index(day), "fetched": "2026-10-06T23:00:00+00:00"}    # before a late sync
+    st.save_wellness_files(day, None, early)
+    assert files_missing(st, day, now=datetime(2026, 10, 8, 1, 0, tzinfo=timezone.utc))   # ... once more later
+    assert not files_missing(st, day, now=datetime(2026, 10, 6, 23, 30, tzinfo=timezone.utc))
+    st.save_wellness_files(day, None, {**early, "fetched": "2026-10-08T01:00:00+00:00"})
+    assert not files_missing(st, day, now=datetime(2026, 10, 9, 1, 0, tzinfo=timezone.utc))  # asked late: final
     st.close()

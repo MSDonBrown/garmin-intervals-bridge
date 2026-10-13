@@ -231,7 +231,9 @@ class IntervalsClient:
 
     def activity_messages(self, activity_id: str) -> list[dict]:
         out = self._api("GET", f"/activity/{_activity_id(activity_id)}/messages")
-        return out if isinstance(out, list) else []
+        if not isinstance(out, list):            # unknown answer: no proof of "no comments" (fail closed)
+            raise ValueError("Intervals messages API did not return a list")
+        return out
 
     def athlete(self) -> dict:
         """The athlete the key belongs to (name, id); `setup` checks a key with it."""

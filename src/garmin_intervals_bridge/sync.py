@@ -15,7 +15,7 @@ from .fit import sha256, validate_fit, wellness_bundle_index
 from .garmin import ESSENTIAL_ENDPOINTS, EXTRA_KEYS, GarminBlocked
 from .intake import intake_values, write_intake
 from .mapping import PROVISIONAL_CODES, map_wellness, merge_wellness, snapshot_corrections
-from .store import Store
+from .store import InstanceBusy, Store
 from .times import external_id_names, parse_utc
 
 log = logging.getLogger(__name__)
@@ -235,10 +235,26 @@ def backfill_intake(intervals: Any, store: Store, *, start: date, end: date, app
     return metrics
 
 
+def files_missing(store: Store, day: date, now: datetime | None = None) -> bool:
+    """No original files of this day on disk – or Garmin said "none" before a late device sync
+    could have brought them (within two days of the day): worth asking once more."""
+    index = store.load_wellness_index(day)
+    if index is None:
+        return True
+    if index.get("files"):
+        return False
+    try:
+        fetched = datetime.fromisoformat(str(index.get("fetched")))
+    except ValueError:
+        return False
+    late = datetime.combine(day + timedelta(days=2), datetime.min.time(), tzinfo=timezone.utc)
+    return fetched < late <= (now or datetime.now(timezone.utc))
+
+
 def mirror_wellness_files(day: date, garmin: Any, store: Store) -> str:
     """Keep the device's original wellness files of a finished day: `on_disk`, `saved`, or
-    `none` when Garmin has no files for it (recorded too, so the day is not asked again)."""
-    if store.load_wellness_index(day) is not None:
+    `none` when Garmin has no files for it (recorded too; asked once more if that came early)."""
+    if not files_missing(store, day):
         return "on_disk"
     data = garmin.wellness_files(day)
     fetched = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -632,8 +648,8 @@ def sync_wellness(settings: Settings, garmin: Any, intervals: Any, store: Store,
             chosen = (endpoints if endpoints is not None
                       else None if fetched is None or fetched < midnight else ESSENTIAL_ENDPOINTS)
             raw = garmin.snapshot(day, **({"endpoints": chosen} if chosen else {}))
-            if chosen is not None:
-                raw = _merge_partial(store.load_snapshot(day), raw)
+            # a full read too: an endpoint that failed this time keeps what the archive had
+            raw = _merge_partial(store.load_snapshot(day), raw)
             store.save_snapshot(day, raw)
             metrics["days_checked"] += 1
             if not raw.get("data"):
@@ -668,6 +684,20 @@ def _merge_partial(previous: dict | None, raw: dict) -> dict:
     errors = {k: v for k, v in (previous.get("errors") or {}).items() if k not in raw["data"]}
     return {**previous, "data": {**(previous.get("data") or {}), **raw["data"]},
             "errors": {**errors, **raw.get("errors", {})}}
+
+
+def transient_errors(raw: dict) -> list[str]:
+    """Endpoints that failed for a passing reason (5xx, timeout, connection) – worth another read;
+    a 4xx or a method this Garmin library lacks is no reason to wait."""
+    out = []
+    for key, error in (raw.get("errors") or {}).items():
+        code = re.search(r"\b([1-5]\d\d)$", str(error))
+        if str(error) != "MethodNotAvailable" and (code is None or code.group(1).startswith("5")):
+            out.append(key)
+    return out
+
+
+FINAL_TRIES = 3                 # a day with passing endpoint failures is final after this many reads
 
 
 # ---- when Garmin is asked for a day's wellness ----
@@ -783,7 +813,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
     readiness_due = (morning == "no-readiness"
                      and int(store.get_meta(f"{readiness_key}:tries") or 0) < READINESS_RETRIES
                      and now_ts >= float(store.get_meta(readiness_key) or 0))
-    files_due = [d for d in past if store.get_meta(f"wellness:final:{d}") and store.load_wellness_index(d) is None
+    files_due = [d for d in past if store.get_meta(f"wellness:final:{d}") and files_missing(store, d)
                  and now_ts >= float(store.get_meta(f"wellness:files:{d}") or 0)]
     unwritten = [d for d in past + [current]
                  if apply and (state := store.wellness_state(d))[0] and not state[1]
@@ -799,22 +829,26 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
     store.set_meta("wellness:check")
 
     def read(day: date, endpoints: tuple[str, ...] | None) -> dict:
-        raw = garmin.snapshot(day, **({"endpoints": endpoints} if endpoints else {}))
-        if endpoints:
-            raw = _merge_partial(store.load_snapshot(day), raw)
+        fresh = garmin.snapshot(day, **({"endpoints": endpoints} if endpoints else {}))
+        raw = _merge_partial(store.load_snapshot(day), fresh)       # a failed endpoint keeps the archive's
         store.save_snapshot(day, raw)
         store.mark_wellness(day)
         metrics["days_checked"] += 1
-        return raw
+        return {**raw, "transient": transient_errors(fresh)}
 
     def write(day: date, raw: dict, rewrite: set[str] | frozenset[str] | None = None) -> None:
+        if rewrite and apply:
+            store.set_meta(f"wellness:rewrite:{day}", "1")     # kept until written: a retry rewrites too
         try:
-            if _write_wellness_day(day, _with_files(store, day, raw), current, settings, intervals, metrics,
-                                   apply=apply, rewrite=set(rewrite) if rewrite else None) and apply:
-                store.mark_wellness(day, written=True)
+            unlocked = _write_wellness_day(day, _with_files(store, day, raw), current, settings, intervals, metrics,
+                                           apply=apply, rewrite=set(rewrite) if rewrite else None)
+            if apply:
+                store.mark_wellness(day, written=True)   # a locked day too: asked again after its next fetch
+                if rewrite and unlocked:
+                    store.set_meta(f"wellness:rewrite:{day}", "")
         except Exception as exc:                         # one day's Intervals trouble must not end the run
             metrics["failed"] += 1
-            log.warning("Wellness %s not written: %s", day, _error_name(exc))
+            log.warning("Wellness %s not written: %s; written from the archive next time", day, _error_name(exc))
 
     def mirror(day: date) -> bool:
         """The device's original files of a finished day; True when they were just saved."""
@@ -829,10 +863,10 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
         metrics["files"] += int(saved)
         return saved
 
-    for day in unwritten:                                # read by a dry run, never written: no new request
+    for day in unwritten:                  # read, never written (a dry run, a failed write): no new request
         if (raw := store.load_snapshot(day)) is not None:
             metrics["days_from_archive"] += 1
-            write(day, raw)
+            write(day, raw, rewrite=PROVISIONAL_CODES if store.get_meta(f"wellness:rewrite:{day}") else None)
 
     record = intervals.wellness(current)
     metrics["intervals_checks"] += 1
@@ -881,17 +915,20 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
         # Intervals' HRV moved away from the night's: the official integration has just written a Health
         # Snapshot over it (it does so for resting HR too). Today's files say which values were the snapshot's;
         # they are only read here, the final read keeps the complete day.
-        store.set_meta(snapshot_key, str(shown))
-        files = garmin.wellness_files(current)
-        snapshots = wellness_bundle_index(files)["health_snapshots"] if files else []
         metrics["snapshot_checks"] = metrics.get("snapshot_checks", 0) + 1
-        if snapshots and (raw := store.load_snapshot(current)) is not None:
-            raw = {**raw, "data": {**(raw.get("data") or {}), "health_snapshots": snapshots}}
-            try:
+        try:
+            files = garmin.wellness_files(current)
+            snapshots = wellness_bundle_index(files)["health_snapshots"] if files else []
+            if snapshots and (raw := store.load_snapshot(current)) is not None:
+                raw = {**raw, "data": {**(raw.get("data") or {}), "health_snapshots": snapshots}}
                 _write_wellness_day(current, raw, current, settings, intervals, metrics, apply=apply, night=night)
-            except Exception as exc:
-                metrics["failed"] += 1
-                log.warning("Wellness %s not written: %s", current, _error_name(exc))
+            store.set_meta(snapshot_key, str(shown))     # done: only now not asked again
+        except GarminBlocked:
+            raise
+        except Exception as exc:
+            metrics["failed"] += 1
+            log.warning("Health Snapshot check of %s not done: %s; again at the next check", current,
+                        _error_name(exc))
     verify_key = f"wellness:verify:{current}"
     if pending_past and not synced and touched and now_ts >= float(store.get_meta(verify_key) or 0):
         # Something new arrived in Intervals for today; ask Garmin whether that was a device sync.
@@ -913,6 +950,11 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
         if not raw.get("data"):
             _backoff(store, retry_key, VERIFY_BACKOFF_MINUTES, now_ts)
             log.warning("No Garmin wellness payload for %s; trying again later", day)
+            continue
+        if raw["transient"] and int(store.get_meta(f"{retry_key}:tries") or 0) < FINAL_TRIES - 1:
+            _backoff(store, retry_key, VERIFY_BACKOFF_MINUTES, now_ts)
+            log.info("Final read of %s: %s failed this time; reading again later", day,
+                     ", ".join(raw["transient"]))
             continue
         store.set_meta(f"wellness:final:{day}", "synced" if synced else "anyway")
         metrics["final"] += 1
@@ -950,7 +992,11 @@ def _try_swap(settings: Any, gid: str, iid: str, garmin: Any, intervals: Any, st
         result = swap_activity(gid, iid, garmin, intervals, store, apply=apply, window_hours=settings.swap_hours)
     except GarminBlocked:
         raise
-    except Exception as exc:                 # before the upload: nothing changed; the copy is completed
+    except InstanceBusy:                     # a swap by hand right now: the next full run looks again
+        log.info("Swap of %s waits: another swap is running", gid)
+        return iid
+    except Exception as exc:
+        # nothing deleted; an upload already sent is recorded (pending/uploaded) and never sent twice
         log.warning("Swap of %s not done (%s); completing Garmin's copy instead", gid, _error_name(exc))
         return None
     outcome = result["outcome"]

@@ -35,6 +35,7 @@ RECENT_ACTIVITY_DAYS = 3
 RECENT_WELLNESS_DAYS = 7
 ACCOUNT_EVERY_DAYS = 7
 READS_KEY = "backup:reads:"   # + day: "<final reads>@<time of the last one>"
+FINAL_TRIES = 3               # a read with passing endpoint failures counts after this many tries
 ACCOUNT_KEY = "backup:account"
 
 
@@ -71,21 +72,31 @@ def _activities(garmin: Any, store: Any, start: date, end: date, metrics: dict, 
 
 
 def _wellness_day(day: date, garmin: Any, store: Any, metrics: dict, endpoints: tuple[str, ...] | None,
-                  files: bool) -> None:
-    from .sync import _merge_partial, mirror_wellness_files
-    raw = garmin.snapshot(day, **({"endpoints": endpoints} if endpoints else {}))
-    if endpoints:
-        raw = _merge_partial(store.load_snapshot(day), raw)
-    store.save_snapshot(day, raw)
+                  files: bool) -> list[str]:
+    """Read a day into the archive (an endpoint that fails keeps what the archive had); the
+    endpoints that failed for a passing reason."""
+    from .sync import _merge_partial, transient_errors
+    fresh = garmin.snapshot(day, **({"endpoints": endpoints} if endpoints else {}))
+    store.save_snapshot(day, _merge_partial(store.load_snapshot(day), fresh))
     store.mark_wellness(day)
     metrics["wellness_days"] += 1
     if files:
-        try:
-            metrics["file_days"] += mirror_wellness_files(day, garmin, store) == "saved"
-        except GarminBlocked:
-            raise
-        except Exception as exc:
-            log.warning("Wellness files of %s not backed up (%s)", day, type(exc).__name__)
+        _files(day, garmin, store, metrics)
+    return transient_errors(fresh)
+
+
+def _files(day: date, garmin: Any, store: Any, metrics: dict) -> None:
+    """The device's original files of the day, when missing (or "none" came too early)."""
+    from .sync import files_missing, mirror_wellness_files
+    if not files_missing(store, day):
+        return
+    try:
+        metrics["file_days"] += mirror_wellness_files(day, garmin, store) == "saved"
+    except GarminBlocked:
+        raise
+    except Exception as exc:
+        metrics["failed"] += 1
+        log.warning("Wellness files of %s not backed up (%s); next run tries again", day, type(exc).__name__)
 
 
 def _account(garmin: Any, store: Any, today: date, metrics: dict, *, history_start: date | None = None,
@@ -115,15 +126,25 @@ def backup_once(settings: Any, garmin: Any, store: Any, *, now: datetime | None 
         count, _, when = (store.get_meta(key) or "0").partition("@")
         reads, last_read = int(count or 0), (float(when) if when else None)
         if not _due(day, now, reads, last_read):
+            if reads:                                   # read already: only files that are still missing
+                _files(day, garmin, store, metrics)
             continue
         try:
-            _wellness_day(day, garmin, store, metrics, None, files=reads == 0)
+            passing = _wellness_day(day, garmin, store, metrics, None, files=True)
         except GarminBlocked:
             raise
         except Exception as exc:
             metrics["failed"] += 1
             log.warning("Backup of wellness %s failed (%s); next run tries again", day, type(exc).__name__)
             continue
+        tries_key = f"{key}:tries"
+        tries = int(store.get_meta(tries_key) or 0) + 1
+        if passing and tries < FINAL_TRIES:             # what failed this time comes with the next run
+            store.set_meta(tries_key, str(tries))
+            metrics["failed"] += 1
+            log.info("Backup of wellness %s: %s failed this time; next run reads again", day, ", ".join(passing))
+            continue
+        store.set_meta(tries_key, "0")
         store.set_meta(key, f"{reads + 1}@{now.timestamp():.0f}")
     _account(garmin, store, today, metrics)
     return metrics

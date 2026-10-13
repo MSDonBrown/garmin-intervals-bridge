@@ -70,6 +70,11 @@ class Store:
                 return str(row[0])
         return None
 
+    def activity_row(self, garmin_id: str) -> tuple[str | None, str | None]:
+        """(status, Intervals id) of the activity table alone – what an upload or swap did."""
+        row = self.db.execute("SELECT status, intervals_id FROM activity WHERE garmin_id=?", (garmin_id,)).fetchone()
+        return (row[0], row[1]) if row else (None, None)
+
     def activity_status(self, garmin_id: str) -> str | None:
         row = self.db.execute("SELECT status FROM activity WHERE garmin_id=?", (garmin_id,)).fetchone()
         return row[0] if row else None
@@ -141,15 +146,20 @@ class Store:
         return time.time() - row[0] < hours * 3600
 
     def mark_wellness(self, day: date, *, written: bool = False) -> None:
-        """Record a Garmin fetch of this day; with `written`, also that Intervals received its values.
+        """Record a Garmin fetch of this day; with `written`, that Intervals received its values.
 
         The two are kept apart so a dry run throttles Garmin like a real run, while the
-        first `--apply` can still map the archived snapshot instead of fetching again."""
+        first `--apply` can still map the archived snapshot instead of fetching again. A new
+        fetch is unwritten until its own write succeeded (a failed write is tried again)."""
         now = time.time()
-        self.db.execute("INSERT INTO wellness(day,fetched,written) VALUES (?,?,?) "
-                        "ON CONFLICT(day) DO UPDATE SET fetched=excluded.fetched, "
-                        "written=COALESCE(excluded.written, wellness.written)",
-                        (day.isoformat(), now, now if written else None))
+        if written:
+            self.db.execute("INSERT INTO wellness(day,fetched,written) VALUES (?,?,?) "
+                            "ON CONFLICT(day) DO UPDATE SET fetched=excluded.fetched, written=excluded.written",
+                            (day.isoformat(), now, now))
+        else:
+            self.db.execute("INSERT INTO wellness(day,fetched,written) VALUES (?,?,NULL) "
+                            "ON CONFLICT(day) DO UPDATE SET fetched=excluded.fetched, written=NULL",
+                            (day.isoformat(), now))
         self.db.commit()
 
     def wellness_state(self, day: date) -> tuple[float | None, float | None]:
@@ -258,6 +268,11 @@ class Store:
             mapping=excluded.mapping""",
                         (garmin_id, intervals_id, sha, json.dumps(sorted(fields)),
                          json.dumps(sorted(streams)), time.time(), mapping))
+        self.db.commit()
+
+    def drop_enrichment(self, garmin_id: str) -> None:
+        """After a swap: what the bridge wrote went with Garmin's deleted copy."""
+        self.db.execute("DELETE FROM enrichment WHERE garmin_id=?", (garmin_id,))
         self.db.commit()
 
     def enrichment(self, garmin_id: str) -> dict | None:

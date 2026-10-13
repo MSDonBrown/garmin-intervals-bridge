@@ -28,9 +28,15 @@ class SwapIntervals(IntervalsFake):
         self.activity_obj.update({"source": "GARMIN_CONNECT", "external_id": "42", "name": "Morning Ride",
                                   "description": "", "created": "2026-10-08T08:05:00Z", "icu_rpe": 6,
                                   "paired_event_id": 77, "type": "Ride", "icu_intervals_edited": False,
-                                  "GarminCaloriesConsumed": 1200, "Computed": 5, "LTPace": "NaN"})
+                                  "GarminCaloriesConsumed": 1200, "Computed": 5, "LTPace": "NaN",
+                                  "start_date_local": "2026-10-08T10:00:00"})
         self.comments, self.calls, self.created, self.delete_status = [], [], {}, None
-        self.upload_result = None
+        self.upload_result, self.update_error, self.ignored, self.gone = None, None, set(), set()
+
+    def activities(self, start, end, fields=None, limit=None):
+        """The list: a deleted activity is not in it (by its id it still answers)."""
+        ids = ([] if "delete i42" in self.calls else ["i42"]) + [k for k in self.created if k not in self.gone]
+        return [{"id": k} for k in ids]
 
     def activity(self, iid):
         if iid in self.created:
@@ -57,8 +63,10 @@ class SwapIntervals(IntervalsFake):
 
     def update_activity(self, iid, fields):
         self.calls.append(("update", iid, fields))
+        if self.update_error:
+            raise http_error(self.update_error)
         if iid in self.created:
-            self.created[iid].update(fields)
+            self.created[iid].update({k: v for k, v in fields.items() if k not in self.ignored})
         return {"id": iid}
 
     def delete_activity(self, iid):
@@ -172,3 +180,118 @@ def test_enrich_after_a_swap_rewrites_no_streams_into_the_original(tmp_path, mon
     enrich.enrich_activity("42", g, i, st, apply=False, intervals_id="i99", refresh_own=True, recheck=True)
     assert seen == [None]                          # the copy's streams are not "own streams" of the original
     st.close()
+
+
+def _uploads(i):
+    return [c for c in i.calls if c[0] == "upload"]
+
+
+def test_the_copy_stays_until_the_athletes_values_are_on_the_original(tmp_path):
+    st, i = Store(tmp_path), SwapIntervals()
+    i.update_error = 502                                            # carrying fails
+    out = swap_activity("42", "i42", GarminFake(), i, st, apply=True, now=NOW)
+    assert out["outcome"] == "review" and "icu_rpe" in out["reason"] and "delete i42" not in i.calls
+    i.update_error = None
+    i.ignored = {"icu_rpe"}                                         # accepted, but not there afterwards
+    out = swap_activity("42", "i42", GarminFake(), i, st, apply=True, now=NOW)
+    assert out["outcome"] == "review" and out["reason"] == "icu_rpe not carried over; both stay"
+    i.ignored = set()
+    out = swap_activity("42", "i42", GarminFake(), i, st, apply=True, now=NOW)        # the next full run
+    assert out["outcome"] == "swapped" and "delete i42" in i.calls
+    assert len(_uploads(i)) == 1                                    # taken up again, never uploaded twice
+    st.close()
+
+
+def test_comments_that_arrive_during_the_swap_keep_both(tmp_path):
+    st, i = Store(tmp_path), SwapIntervals()
+    real = i.update_activity
+
+    def update(iid, fields):
+        i.comments = [{"content": "great ride!"}]                  # the coach, just now
+        return real(iid, fields)
+    i.update_activity = update
+    out = swap_activity("42", "i42", GarminFake(), i, st, apply=True, now=NOW)
+    assert out["outcome"] == "review" and "comments" in out["reason"] and "delete i42" not in i.calls
+    st.close()
+
+
+def test_a_delete_is_tried_again_only_while_both_are_listed_and_without_comments(tmp_path):
+    for case in ("original gone", "comments", "fine"):
+        st, i = Store(tmp_path / case), SwapIntervals()
+        i.delete_status = 502
+        swap_activity("42", "i42", GarminFake(), i, st, apply=True, now=NOW)
+        i.delete_status = None
+        if case == "original gone":
+            i.gone.add("i99")                    # the athlete deleted the new one; by its id it still answers
+        if case == "comments":
+            i.comments = [{"content": "!"}]
+        assert retry_deletes(i, st) == (1 if case == "fine" else 0)
+        assert ("delete i42" in i.calls) is (case == "fine")
+        assert st.meta_items("swap:delete:*") == [("swap:delete:i42", "")]      # not tried again
+        st.close()
+
+
+def test_an_upload_with_an_unknown_outcome_is_never_sent_again(tmp_path):
+    st, i = Store(tmp_path), SwapIntervals()
+
+    def lost(gid, path, **extra):
+        i.calls.append(("upload", gid, extra))
+        raise requests.ReadTimeout("no answer")
+    i.upload_fit = lost
+    try:
+        swap_activity("42", "i42", GarminFake(), i, st, apply=True, now=NOW)
+    except requests.ReadTimeout:
+        pass
+    assert st.activity_status("42") == "pending"
+    out = swap_activity("42", "i42", GarminFake(), i, st, apply=True, now=NOW)
+    assert out["outcome"] == "kept" and "reset-pending --activity-id 42" in out["reason"]
+    assert len(_uploads(i)) == 1 and not any(str(c).startswith("delete") for c in i.calls)
+    st.close()
+
+
+def test_a_typed_zero_goes_over_but_not_what_the_filtered_file_gave(tmp_path):
+    st, i = Store(tmp_path), SwapIntervals()
+    i.activity_obj.update(GarminCaloriesConsumed=0, AerobicEffect=0.0, trainer=False)
+    out = swap_activity("42", "i42", GarminFake(), i, st, apply=False, now=NOW)
+    assert "GarminCaloriesConsumed" in out["carry"]                 # typed in: 0 is a value
+    assert "AerobicEffect" not in out["carry"]                      # from the FIT: the original's own wins
+    assert "trainer" not in out["carry"]
+    st.close()
+
+
+def test_edited_intervals_stop_automatic_swaps_after_bridge_streams_too(tmp_path):
+    st, i = Store(tmp_path), SwapIntervals()
+    st.record_enrichment("42", "i42", "old-sha", [], ["Stamina"])  # the bridge wrote streams (an "edit")
+    i.activity_obj["icu_intervals_edited"] = True
+    out = swap_activity("42", "i42", GarminFake(), i, st, apply=True, now=NOW)
+    assert out["outcome"] == "kept" and "swap it by hand" in out["reason"]
+    out = swap_activity("42", "i42", GarminFake(), i, st, apply=True, window_hours=None, now=NOW)
+    assert out["outcome"] == "swapped" and "warning" in out
+    assert st.enrichment("42") is None and st.activity_intervals_id("42") == "i99"   # not the deleted copy
+    st.close()
+
+
+def test_a_workout_not_paired_again_is_tried_again(tmp_path):
+    st, i = Store(tmp_path), SwapIntervals()
+    real = i.update_activity
+
+    def update(iid, fields):
+        if "paired_event_id" in fields and not i.calls.count("pairing failed"):
+            i.calls.append("pairing failed")
+            raise http_error(502)
+        return real(iid, fields)
+    i.update_activity = update
+    assert swap_activity("42", "i42", GarminFake(), i, st, apply=True, now=NOW)["outcome"] == "swapped"
+    assert st.meta_items("swap:pair:*") == [("swap:pair:i99", "77")]
+    retry_deletes(i, st)
+    assert i.created["i99"]["paired_event_id"] == 77 and st.meta_items("swap:pair:*") == [("swap:pair:i99", "")]
+    st.close()
+
+
+def test_comments_that_cannot_be_read_count_as_comments(monkeypatch):
+    from garmin_intervals_bridge.intervals import IntervalsClient
+    client = IntervalsClient("k", "0")
+    monkeypatch.setattr(client, "_api", lambda *a, **k: {"unexpected": True})
+    import pytest
+    with pytest.raises(ValueError):
+        client.activity_messages("i42")

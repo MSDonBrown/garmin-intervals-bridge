@@ -59,7 +59,10 @@ def fit_segments(data: bytes) -> list[bytes]:
 
 def validate_fit(data: bytes) -> None:
     """Structural check followed by the SDK's CRC check of header and data, per segment."""
-    for segment in fit_segments(data):
+    segments = fit_segments(data)
+    if not segments:
+        raise InvalidFIT("Empty download: no FIT file in it")
+    for segment in segments:
         decoder = Decoder(Stream.from_byte_array(bytearray(segment)))
         if not decoder.is_fit():
             raise InvalidFIT("Not a FIT file according to the SDK")
@@ -77,11 +80,13 @@ def extract_original_fit(download: bytes) -> bytes:
             # No extraction to disk: prevents zip-slip, oversized ZIP bombs, etc.
             entry = entries[0]
             if entry.file_size > MAX_FIT_BYTES:
-                raise InvalidFIT("Unexpectedly large FIT (>200MB)")
+                raise InvalidFIT(f"Unexpectedly large FIT (>{MAX_FIT_BYTES // 2**20} MB)")
             with z.open(entry) as f:
                 data = f.read(MAX_FIT_BYTES + 1)
     else:
         data = download
+    if len(data) > MAX_FIT_BYTES:
+        raise InvalidFIT(f"Unexpectedly large FIT (>{MAX_FIT_BYTES // 2**20} MB)")
     validate_fit(data)
     return data
 
@@ -90,18 +95,22 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def decode_fit(data: bytes) -> tuple[dict[str, list[dict]], list]:
+def decode_fit(data: bytes, *, checked: bool = False) -> tuple[dict[str, list[dict]], list]:
     """Decode to {message_name: [messages]} plus the SDK's non-fatal error list.
 
     Timestamps stay numeric (FIT epoch seconds) so results are JSON-safe.
     Heart-rate merging is off: the record stream must stay what the device wrote.
+    The CRC is checked once – here, or (`checked`) already when the file was downloaded;
+    in pure Python it costs about a third of the decoding.
     """
     normalised: dict[str, list[dict]] = {}
     errors: list = []
-    validate_fit(data)
+    if not checked:
+        validate_fit(data)
     for segment in fit_segments(data):           # a chained file: every segment's messages, in order
         decoder = Decoder(Stream.from_byte_array(bytearray(segment)))   # a fresh stream: the check consumed its own
-        messages, segment_errors = decoder.read(convert_datetimes_to_dates=False, merge_heart_rates=False)
+        messages, segment_errors = decoder.read(convert_datetimes_to_dates=False, merge_heart_rates=False,
+                                                enable_crc_check=False)
         errors.extend(segment_errors)
         for key, items in messages.items():
             # Profile messages arrive as "<name>_mesgs"; unknown ones as their number.
