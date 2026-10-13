@@ -174,7 +174,8 @@ def load_options_file(path: Path | None = None) -> list[str]:
 
 
 def _positive_int(name: str, default: int, max_value: int) -> int:
-    value = int(os.getenv(name, str(default)))
+    raw = os.getenv(name, "").strip()                    # set but empty (`NAME=`): the default
+    value = int(raw) if raw else default
     if not 1 <= value <= max_value:
         raise ValueError(f"{name} must be between 1 and {max_value}")
     return value
@@ -268,7 +269,7 @@ class Settings:
         data_dir = _path("BRIDGE_DATA_DIR", "data", base)
         token_dir = _path("GARMIN_TOKEN_DIR", str(data_dir / "tokens"), base)
         tz, tz_source = _timezone()
-        delay = float(os.getenv("BRIDGE_GARMIN_REQUEST_DELAY", "0.5"))
+        delay = float(os.getenv("BRIDGE_GARMIN_REQUEST_DELAY", "").strip() or "0.5")
         if delay < 0.25:
             raise ValueError("BRIDGE_GARMIN_REQUEST_DELAY must be >= 0.25 seconds")
         profile = os.getenv("BRIDGE_WELLNESS_PROFILE", "recommended").strip().lower()

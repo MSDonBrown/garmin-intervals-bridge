@@ -137,3 +137,13 @@ def test_the_crc_is_checked_once(monkeypatch):
     fit.decode_fit(data)
     fit.decode_fit(data, checked=True)                      # just downloaded: checked there
     assert checks == [1]
+
+
+def test_a_segment_cannot_declare_more_than_a_fit_file_holds():
+    # thanks @FrancescoCastaldi
+    import struct
+
+    from garmin_intervals_bridge.fit import fit_segments
+    header = bytes([14, 0x20, 0x00, 0x00]) + struct.pack("<I", 50 * 1024 * 1024) + b".FIT\x00\x00"
+    with pytest.raises(InvalidFIT, match="declares"):
+        fit_segments(header + b"\x00\x00")

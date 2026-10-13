@@ -171,3 +171,13 @@ def test_the_daily_probe_sends_the_sign_in_alert(tmp_path, monkeypatch):
     probe(s, Garmin(), Intervals(), st)
     assert sent[0] == alerts.LOGIN_SUBJECT
     st.close()
+
+
+def test_a_push_title_is_one_line_and_padding_is_dropped():
+    # thanks @FrancescoCastaldi: a line break in the title made the push fail
+    ntfy = Ntfy()
+    s = settings(ntfy_url="  https://ntfy.sh/topic \n", ntfy_token="  tk_example  ")
+    alerts.send_push(s, "Garmin needs\na new sign-in\r\n", "Body", session=ntfy)
+    url, text, headers = ntfy.posts[0]
+    assert url == "https://ntfy.sh/topic" and headers["Title"] == "Garmin needs a new sign-in"
+    assert headers["Authorization"] == "Bearer tk_example"

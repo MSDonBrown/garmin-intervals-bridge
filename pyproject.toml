@@ -40,6 +40,9 @@ garmin-intervals-bridge = "garmin_intervals_bridge.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+garmin_intervals_bridge = ["py.typed"]     # PEP 561: the package's type hints count for type checkers
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

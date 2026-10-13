@@ -39,3 +39,20 @@ def test_poll_hours_ranges_also_over_midnight():
     for bad in ("10", "10-10", "25-3", "morning"):
         with pytest.raises(ValueError, match="BRIDGE_POLL_HOURS"):
             config.poll_hours(bad)
+
+
+def test_a_setting_left_empty_means_its_default(monkeypatch):
+    # thanks @FrancescoCastaldi: `BRIDGE_ACTIVITY_LOOKBACK_DAYS=` stopped the bridge
+    for value in ("", "   "):
+        monkeypatch.setenv("BRIDGE_ACTIVITY_LOOKBACK_DAYS", value)
+        assert config._positive_int("BRIDGE_ACTIVITY_LOOKBACK_DAYS", 4, 30) == 4
+    monkeypatch.setenv("BRIDGE_ACTIVITY_LOOKBACK_DAYS", " 8 ")
+    assert config._positive_int("BRIDGE_ACTIVITY_LOOKBACK_DAYS", 4, 30) == 8
+    monkeypatch.setenv("BRIDGE_ACTIVITY_LOOKBACK_DAYS", "31")
+    with pytest.raises(ValueError, match="between 1 and 30"):
+        config._positive_int("BRIDGE_ACTIVITY_LOOKBACK_DAYS", 4, 30)
+    monkeypatch.setenv("INTERVALS_API_KEY", "not-a-real-key")
+    monkeypatch.setenv("BRIDGE_GARMIN_REQUEST_DELAY", " ")
+    monkeypatch.setenv("BRIDGE_ACTIVITY_LOOKBACK_DAYS", "")
+    settings = config.Settings.from_env()
+    assert settings.garmin_request_delay == 0.5 and settings.activity_days == 4

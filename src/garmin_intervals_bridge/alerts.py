@@ -109,12 +109,15 @@ def send_email(settings: Any, subject: str, text: str, *, smtp: Any = None) -> N
 
 
 def send_push(settings: Any, subject: str, text: str, *, session: Any = None) -> None:
-    url = settings.ntfy_url
-    if not str(url).startswith(("https://", "http://")):
+    url = str(settings.ntfy_url or "").strip()
+    if not url.startswith(("https://", "http://")):
         raise ValueError("BRIDGE_NTFY_URL must be a web address, e.g. https://ntfy.sh/<topic>")
-    headers = {"Title": subject.encode("ascii", "replace").decode(), "Tags": "warning"}
-    if getattr(settings, "ntfy_token", None):
-        headers["Authorization"] = f"Bearer {settings.ntfy_token}"
+    # an HTTP header is one line: a line break in the subject would make the push fail
+    title = " ".join(subject.encode("ascii", "replace").decode().split())
+    headers = {"Title": title, "Tags": "warning"}
+    token = str(getattr(settings, "ntfy_token", None) or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     response = (session or requests).post(url, data=text.encode("utf-8"), headers=headers, timeout=15)
     response.raise_for_status()
 

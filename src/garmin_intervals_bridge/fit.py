@@ -49,6 +49,8 @@ def fit_segments(data: bytes) -> list[bytes]:
         if data[pos + 8:pos + 12] != b".FIT":
             raise InvalidFIT("FIT magic header missing")
         declared = struct.unpack_from("<I", data, pos + 4)[0]
+        if declared > MAX_FIT_BYTES:
+            raise InvalidFIT(f"FIT segment declares {declared} bytes, more than {MAX_FIT_BYTES // 2**20} MB")
         end = pos + size + declared + 2  # FIT CRC after data
         if end > len(data):
             raise InvalidFIT(f"FIT length mismatch: expected {end}, got {len(data)}")
