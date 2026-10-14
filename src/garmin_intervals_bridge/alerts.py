@@ -41,8 +41,9 @@ PROVIDERS = {
 }
 # What the owner has to do at the provider before the bridge may send.
 HINTS = {
-    "smtp.gmail.com": "Gmail needs an app password (Google account -> Security -> 2-Step Verification -> "
-                      "App passwords); 2-step verification has to be on.",
+    "smtp.gmail.com": "Gmail needs an app password: turn on 2-Step Verification, then open "
+                      "https://myaccount.google.com/apppasswords (Google's Security menu shows it only once you "
+                      "have one). Any name will do; the bridge needs only the 16 characters, spaces or not.",
     "mail.gmx.net": "GMX: allow 'POP3/IMAP access' in the mailbox settings, then use your normal password.",
     "mail.gmx.com": "GMX: allow 'POP3/IMAP access' in the mailbox settings, then use your normal password.",
     "smtp.web.de": "web.de: allow 'POP3/IMAP access' in the mailbox settings, then use your normal password.",

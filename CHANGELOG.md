@@ -17,6 +17,8 @@
 
 - A Gmail app password works as Google shows it, in groups with spaces ("abcd efgh ijkl
   mnop"), and without them. Before, it was refused with the spaces.
+- The Gmail hint links Google's app-password page directly: the Security menu shows it only
+  once you have one (thanks Lukasz_Pludowski).
 
 ## 0.11.2 — 2026-10-14
 
