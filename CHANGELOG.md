@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.3 — unreleased
+
+### Changed
+
+- **Charts:** a chart the bridge puts on the Fitness page (*Actions → Charts*, `setup-charts`)
+  is now a copy of the same chart in Intervals' chart library, as Intervals' own *Copy* makes
+  it (`from_id`): the library shows how many use it. Each copy stays your own; a later change
+  to the library chart does not reach it.
+- The charts' description links the forum thread instead of GitHub – where Intervals users
+  find what the bridge is, its guides and answers.
+
 ## 0.11.2 — 2026-10-14
 
 The Home Assistant app starts again.

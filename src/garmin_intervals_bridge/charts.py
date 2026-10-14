@@ -329,8 +329,32 @@ def _plot(index: int, spec: tuple, inputs: dict[str, dict]) -> dict | None:
     return plot
 
 
-BRIDGE_MARK = ("Created by garmin-intervals-bridge for the values it syncs: "
-               "https://github.com/futureweb/garmin-intervals-bridge")
+BRIDGE_MARK = "Created by garmin-intervals-bridge for the values it syncs: https://forum.intervals.icu/t/132863"
+# The same charts in Intervals' chart library, shared by the bridge's author: a chart the bridge
+# makes is a copy of its library chart (`from_id`, as Intervals' own "Copy" does), so the library
+# counts its users. A later change to the library chart does not reach the copies.
+LIBRARY_IDS = {
+    "Garmin Bridge: Readiness & recovery": 1268942,
+    "Garmin Bridge: Sleep stages": 1268943,
+    "Garmin Bridge: Stress & Body Battery": 1268944,
+    "Garmin Bridge: Nutrition intake vs. burn": 1268945,
+    "Garmin Bridge: Energy balance (weekly)": 1269015,
+    "Garmin Bridge: Energy balance (monthly)": 1269016,
+    "Garmin Bridge: Nutrition macros": 1268958,
+    "Garmin Bridge: Endurance & hill scores": 1268997,
+    "Garmin Bridge: VO2max & fitness age": 1268946,
+    "Garmin Bridge: Race predictions 5K / 10K": 1268998,
+    "Garmin Bridge: Race predictions half / marathon": 1269005,
+    "Garmin Bridge: Intensity minutes & sweat loss": 1268947,
+    "Garmin Bridge: Hydration & sweat loss": 1268972,
+    "Garmin Bridge: SpO2 & respiration": 1269043,
+    "Garmin Bridge: Sleep score, sleeping HR & stress": 1269044,
+    "Garmin Bridge: Steps": 1269045,
+    "Garmin Bridge: Body composition": 1269046,
+    "Garmin Bridge: Skin temperature": 1268948,
+    "Garmin Bridge: HRV detail": 1268949,
+    "Garmin Bridge: Health Snapshot": 1270871,
+}
 
 
 def is_bridge_item(item: dict) -> bool:
@@ -401,8 +425,11 @@ def plan_charts(custom_items: list[dict]) -> dict:
                    "plots": plots, "height": chart["height"], "yAxisLabel": chart["y"],
                    "yAxisMin": None, "yAxisMax": None, "y2AxisLabel": chart.get("y2"), "y2AxisMin": None,
                    "y2AxisMax": None, "y3AxisMin": None, "y3AxisMax": None, "stackTo100Percent": None}
-        create.append({"name": chart["name"], "type": "FITNESS_CHART", "visibility": "PRIVATE",
-                       "description": BRIDGE_MARK, "content": content, "_missing_fields": missing})
+        item = {"name": chart["name"], "type": "FITNESS_CHART", "visibility": "PRIVATE",
+                "description": BRIDGE_MARK, "content": content, "_missing_fields": missing}
+        if chart["name"] in LIBRARY_IDS:
+            item["from_id"] = LIBRARY_IDS[chart["name"]]
+        create.append(item)
     return {"create": create, "update": update, "skipped": skipped}
 
 

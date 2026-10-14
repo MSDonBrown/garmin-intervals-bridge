@@ -169,3 +169,14 @@ def test_plots_that_share_an_axis_share_the_native_plots_scale():
                         ("Garmin Bridge: Hydration & sweat loss", ("GarminSweatLossLitres",))):
         chart = next(c for c in plan_charts(items(*codes))["create"] if c["name"] == name)
         assert len({p["scale"] for p in chart["content"]["plots"]}) == 1, name
+
+
+def test_a_new_chart_is_a_copy_of_its_library_chart_and_links_the_forum():
+    from garmin_intervals_bridge.charts import LIBRARY_IDS, is_bridge_item
+    plan = plan_charts(items("GarminTrainingReadiness", "BodyBatteryMax", "GarminHRVLastNight"))
+    made = {c["name"]: c for c in plan["create"]}
+    assert made and all(c["from_id"] == LIBRARY_IDS[name] for name, c in made.items())   # the library counts users
+    assert all(c["description"] == BRIDGE_MARK for c in made.values())
+    assert BRIDGE_MARK.endswith("https://forum.intervals.icu/t/132863")
+    assert is_bridge_item({"description": "Created by garmin-intervals-bridge for the values it syncs: "
+                                          "https://github.com/futureweb/garmin-intervals-bridge"})   # older charts too
