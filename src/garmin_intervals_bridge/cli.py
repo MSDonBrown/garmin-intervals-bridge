@@ -28,7 +28,7 @@ from .gear import report as gear_report
 from .gear import save_config as save_gear_config
 from .gear import sync_recent as sync_gear_recent
 from .health import liveness, probe
-from .intervals import IntervalsClient, rate_limited
+from .intervals import IntervalsClient, rate_limited, request_error, transient
 from .store import InstanceBusy, Store, single_instance
 from .sync import (
     backfill_intake,
@@ -324,6 +324,7 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
             elif not polling.due(settings, store, now, poll_seconds, mode)[0]:
                 pass                                    # quiet hours, or not yet: the full runs go on
             elif mode == "upload":
+                polling.note_look(store, now)
                 garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
                 result = sync_activities(settings, garmin, intervals, store, apply=apply, allow_upload=True,
                                          activity_days=2)
@@ -337,6 +338,7 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                     log.info("Garmin poll: %d uploaded, %d would upload", result["uploaded"], result["would_upload"])
             else:
                 # the poll shares the full run's Garmin session: count only its own requests
+                polling.note_look(store, now)
                 before = garmin.requests
                 result = watch_once(settings, garmin, intervals, store, apply=apply)
                 wellness = wellness_check(settings, garmin, intervals, store, apply=apply)
@@ -369,7 +371,7 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
             if pause_on_rate_limit(store, exc):
                 next_sync = max(next_sync, time.time() + RATE_LIMIT_PAUSE_SECONDS)
             elif exc.__class__.__module__.startswith("requests"):
-                log.error("HTTP/API request failed: %s", type(exc).__name__)
+                log.error("HTTP/API request failed: %s", request_error(exc))
             else:
                 log.error("%s: %s", type(exc).__name__, exc)
             if now >= next_sync:             # the full run failed: again after a growing break, not each tick
@@ -796,6 +798,7 @@ def main(argv: list[str] | None = None) -> int:
                     if not due:
                         print(json.dumps({"apply": args.apply, "skipped": why}))
                         return 0
+                    polling.note_look(store, started)
                 if args.cmd == "watch":
                     intervals = IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
                     result: dict = {}
@@ -908,8 +911,13 @@ def main(argv: list[str] | None = None) -> int:
                 store.close()
     except Exception as exc:
         # Do not echo possibly credential-bearing exception messages for requests failures.
+        if getattr(args, "cmd", None) == "watch" and transient(exc):
+            # a server that is briefly away: no failed unit, no alert mail; the next look (at the
+            # pace) tries again, and health reports a watch that keeps failing (3 h)
+            log.warning("Look for new activities failed: %s; the next one tries again", request_error(exc))
+            return 0
         if exc.__class__.__module__.startswith("requests"):
-            log.error("HTTP/API request failed: %s", type(exc).__name__)
+            log.error("HTTP/API request failed: %s", request_error(exc))
         else:
             log.error("%s: %s", type(exc).__name__, str(exc))
         return 1

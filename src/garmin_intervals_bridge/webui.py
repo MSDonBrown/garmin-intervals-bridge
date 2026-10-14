@@ -73,7 +73,9 @@ HEADERS = {
                                "form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
-    "Referrer-Policy": "no-referrer",
+    # same-origin, not no-referrer: with no-referrer a browser sends a form's Origin as "null"
+    # (Firefox does, as the Fetch standard says); other sites still learn nothing
+    "Referrer-Policy": "same-origin",
     "Cache-Control": "no-store",
 }
 # Home Assistant shows an ingress page in a frame of its own (same origin): that one frame is allowed
@@ -859,8 +861,10 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
                 raw = self.rfile.read(length).decode("utf-8", errors="replace")
                 form = {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
                 origin = self.headers.get("Origin")
-                # behind ingress the browser talks to Home Assistant, not to us: the token decides
-                if origin and not ui.ingress and urlsplit(origin).netloc != self.headers.get("Host", ""):
+                # behind ingress the browser talks to Home Assistant, not to us: the token decides;
+                # "null" says nothing (a privacy setting) – the session's token and cookie still must fit
+                if origin and origin != "null" and not ui.ingress and \
+                        urlsplit(origin).netloc != self.headers.get("Host", ""):
                     raise Reply(403, "Foreign form")
             session = ui.session(self.headers.get("Cookie"))
             if session is None:

@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 HOT_MINUTES = 60                # after a new activity: fast, a second one may follow
 NOW_KEY = "poll:now"            # "Check now" on the web page
 NEW_KEY = "poll:new"            # upload mode: when a poll or full run last found a new activity
+TRIED_KEY = "poll:tried"        # when the last look began – one that failed counts for the pace too
 ASK_GAP = 30                    # "Check now" right after a look waits this long (no button hammering)
 PAUSE_KEY = "intervals:paused_until"    # Intervals answered 429: nothing until then
 PLAN_KEY = "poll:plan"          # adaptive: the learned week, worked out once a day
@@ -191,9 +192,17 @@ def note_new(store: Any, now: float) -> None:
     store.set_meta(NEW_KEY, f"{now:.0f}")
 
 
+def note_look(store: Any, now: float) -> None:
+    """A look begins: during an outage the next one waits for the pace, not for the next minute."""
+    store.set_meta(TRIED_KEY, f"{now:.3f}")
+
+
 def last_look(store: Any, mode: str = "enrich") -> float | None:
-    """The last look for new activities; in upload mode a full run reads Garmin's list too."""
-    looks = [store.last_run("watch")] + ([store.last_run("sync")] if mode == "upload" else [])
+    """The last look for new activities, failed ones too; in upload mode a full run reads Garmin's
+    list as well."""
+    tried = store.get_meta(TRIED_KEY)
+    looks = ([store.last_run("watch"), float(tried) if tried else None]
+             + ([store.last_run("sync")] if mode == "upload" else []))
     return max((t for t in looks if t is not None), default=None)
 
 

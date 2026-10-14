@@ -164,7 +164,10 @@ Runner = Callable[[list[str]], Any]
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, check=True)
+    # Windows tools answer in the console's code page (cp850 on a German system: "ä" is 0x84),
+    # not in UTF-8; and an odd byte must never stop the web page
+    return subprocess.run(cmd, capture_output=True, text=True, check=True,
+                          encoding="oem" if os.name == "nt" else None, errors="replace")
 
 
 def _may_fail(cmd: list[str]) -> bool:

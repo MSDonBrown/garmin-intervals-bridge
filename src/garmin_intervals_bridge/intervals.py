@@ -8,6 +8,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -51,6 +52,33 @@ def rate_limited(exc: BaseException) -> float | None:
     if getattr(response, "status_code", None) != 429:
         return None
     return _seconds(response.headers.get("Retry-After")) or 0.0
+
+
+def request_error(exc: BaseException) -> str:
+    """'intervals.icu: too many 503 error responses' – which server and why, never a URL's path,
+    query or credentials."""
+    request = getattr(exc, "request", None)
+    response = getattr(exc, "response", None)
+    url = getattr(request, "url", None) or getattr(response, "url", None) or ""
+    host = urlsplit(str(url)).hostname or "?"
+    status = getattr(response, "status_code", None)
+    reason = getattr(exc.args[0], "reason", None) if exc.args else None   # urllib3's MaxRetryError
+    if status:
+        why = f"HTTP {status}"
+    elif reason is not None and str(reason).strip():
+        why = str(reason).split(" (")[0] if "error responses" in str(reason) else type(reason).__name__
+    else:
+        why = type(exc).__name__
+    return f"{host}: {why}"
+
+
+def transient(exc: BaseException) -> bool:
+    """A failure that tends to pass on its own: no connection, a timeout, a server error (5xx)."""
+    if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                        requests.exceptions.RetryError, requests.exceptions.ChunkedEncodingError)):
+        return True
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return isinstance(status, int) and status >= 500
 
 
 def refused(exc: BaseException) -> bool:

@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.11.1 — unreleased
+## 0.11.1 — 2026-10-14
 
-Contributions, and a container that says whether the bridge works.
+The web page works in Firefox, a short outage is no alarm – and a container that says
+whether the bridge works.
 
 ### Added
 
@@ -16,6 +17,24 @@ Contributions, and a container that says whether the bridge works.
 - The package says its type hints count (PEP 561 `py.typed`; thanks @FrancescoCastaldi).
 
 ### Fixed
+
+- **The web page in Firefox:** every button and form answered "foreign form". The page
+  asked browsers to send no referrer, and with that Firefox (as the web's Fetch standard
+  says) sends a form's origin as `null`, which the check took for a foreign site. The page
+  now keeps the referrer on its own pages, and a `null` origin counts as "no information";
+  the session's token and cookie still have to fit. Thanks Samantha_Lane and No_Cheetah in the forum.
+- **Windows:** the web page's "Starts at login" check read the scheduler's answer as UTF-8.
+  On a German Windows it comes in the console's code page ("ä" is byte 0x84), which ended in
+  a `UnicodeDecodeError` in the console. It is read in that code page now, and an odd byte
+  never stops anything. Thanks No_Cheetah.
+- **A server briefly away:**
+  - A failed look for new activities counts for the pace. During an outage the bridge
+    tries again at the planned pace (at night every 30 minutes), not every minute.
+  - Under systemd, `watch` treats a connection failure, a timeout or a 5xx as a warning,
+    without a failed unit or an alert mail; a watch that keeps failing is still reported
+    (health: "watch not running" after 3 hours).
+  - The log says which server and why, e.g. `intervals.icu: too many 503 error responses`,
+    instead of only `RetryError`.
 
 Thanks @FrancescoCastaldi for each of these:
 
