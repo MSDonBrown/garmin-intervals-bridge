@@ -104,7 +104,10 @@ def send_email(settings: Any, subject: str, text: str, *, smtp: Any = None) -> N
     with smtp(host, port, timeout=20, **kwargs) as server:
         if port != 465:
             server.starttls(context=context)
-        server.login(user, settings.smtp_password)
+        password = settings.smtp_password
+        if host == "smtp.gmail.com":                 # Google shows an app password in groups: "abcd efgh ijkl mnop"
+            password = "".join(str(password).split())
+        server.login(user, password)
         server.send_message(message)
 
 

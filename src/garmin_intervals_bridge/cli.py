@@ -505,7 +505,7 @@ def _autostart(args: argparse.Namespace, settings: Settings) -> int:
         print("Autostart removed; the bridge is stopped. Your settings and data stay where they are.")
         return 0
     steps = autostart.install(settings.env_file, mode=args.mode or settings.mode)
-    print("The bridge now runs in the background and starts whenever you log in.")
+    print("The bridge now runs in the background and starts by itself whenever you log in to this computer.")
     if settings.log_file:
         print(f"Log: {settings.log_file}")
     else:

@@ -10,6 +10,13 @@
   to the library chart does not reach it.
 - The charts' description links the forum thread instead of GitHub – where Intervals users
   find what the bridge is, its guides and answers.
+- `setup` and the web page say what "log in" means for the background bridge: it starts by
+  itself whenever you log in to this computer (thanks Lukasz_Pludowski in the forum).
+
+### Fixed
+
+- A Gmail app password works as Google shows it, in groups with spaces ("abcd efgh ijkl
+  mnop"), and without them. Before, it was refused with the spaces.
 
 ## 0.11.2 — 2026-10-14
 

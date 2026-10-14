@@ -482,7 +482,8 @@ def _run(p: Prompt, client: Callable[[str], Any], garmin_source: Callable[..., A
         except InstanceBusy:
             running = True
             p.say("The bridge already runs in the background; it restarts with these settings.")
-        if not p.yes("Start now: write to Intervals, and run in the background whenever you are logged in?"):
+        if not p.yes("Start now: write to Intervals, and run in the background – from now on whenever you log in "
+                     "to this computer (no terminal needed)?"):
             me = command_name()
             p.say(f"Nothing written to Intervals. Start it later with: {me} autostart\n"
                   f"(or in a window that stays open: {me} run --apply)")
@@ -492,7 +493,7 @@ def _run(p: Prompt, client: Callable[[str], Any], garmin_source: Callable[..., A
         store.close()
     steps = install(settings.env_file or path)
     p.say("\nDone. The bridge runs in the background now"
-          + (" (restarted)." if running else " and starts whenever you log in."))
+          + (" (restarted)." if running else " and starts by itself whenever you log in to this computer."))
     for line in notes:
         p.say(line)
     me = command_name()
@@ -539,12 +540,13 @@ def _run_backup(p: Prompt, path: Path, saved: dict[str, str], save: Callable[[di
     finally:
         store.close()
     me = command_name()
-    if not p.yes("Keep backing up in the background, whenever you are logged in?"):
+    if not p.yes("Keep backing up in the background – from now on whenever you log in to this computer?"):
         p.say(f"Start it later with: {me} autostart  (or in a window that stays open: {me} run)")
         return 0
     steps_done = install(settings.env_file or path, mode="backup")
     p.say("\nDone. The backup runs in the background now" + (" (restarted)." if running else
-                                                               " and starts whenever you log in."))
+                                                               " and starts by itself whenever you log in to "
+                                                               "this computer."))
     p.say(f"  Your data: {settings.data_dir}  (what is where: {GUIDES}/BACKUP.md)\n"
           f"  The past:  {me} backup --from 2020-01-01  (once; runs next to the background backup, takes a while)\n"
           f"  Log:       {settings.log_file}\n"

@@ -242,7 +242,8 @@ class UI:
             kind = autostart.platform()
             if not self.in_run and kind != "container" and settings.env_file is not None:
                 state = autostart.status(settings.env_file)
-                rows.append(("Starts at login", '<span class="ok">yes</span>' if state["installed"] else
+                rows.append(("Starts when you log in to this computer",
+                             '<span class="ok">yes</span>' if state["installed"] else
                              '<span class="warn">no</span> &middot; set it up with <code>autostart</code>'))
             garmin_ok = store.meta_updated("garmin_last_ok")
             if store.get_meta(notices.LOGIN_NOTE_KEY):

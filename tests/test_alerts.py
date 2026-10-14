@@ -181,3 +181,30 @@ def test_a_push_title_is_one_line_and_padding_is_dropped():
     url, text, headers = ntfy.posts[0]
     assert url == "https://ntfy.sh/topic" and headers["Title"] == "Garmin needs a new sign-in"
     assert headers["Authorization"] == "Bearer tk_example"
+
+
+def test_a_gmail_app_password_works_with_or_without_its_spaces(monkeypatch):
+    # Google shows it as "abcd efgh ijkl mnop"; pasted like that it is refused
+    logins = []
+
+    class Server:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self, **k):
+            pass
+
+        def login(self, user, password):
+            logins.append(password)
+
+        def send_message(self, message):
+            pass
+    s = settings(alert_email="ann@gmail.com", smtp_password="abcd efgh ijkl mnop")
+    alerts.send_email(s, "S", "T", smtp=Server)
+    assert logins == ["abcdefghijklmnop"]

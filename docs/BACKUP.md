@@ -9,7 +9,7 @@ No Intervals account needed; nothing is written anywhere but that folder.
 Windows / Mac: install as in the [Windows](WINDOWS.md) or [Mac](MAC.md) guide, then
 `setup` and answer **2** to *"What should the bridge do?"*. It asks for your time zone,
 signs you in to Garmin, offers alerts, makes a first backup of the last days and starts
-backing up in the background whenever you are logged in.
+backing up in the background, from then on whenever you log in to the computer.
 
 Container (Synology, Unraid, Docker): the same image, with `BRIDGE_MODE=backup` and the
 command `run` – no `INTERVALS_API_KEY`. Linux with systemd: `garmin-intervals-bridge run
