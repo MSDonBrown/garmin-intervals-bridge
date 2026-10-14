@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.2 — 2026-10-14
+
+The Home Assistant app starts again.
+
+### Fixed
+
+- **Home Assistant app stuck in "Starting":** 0.11.1 put the container healthcheck into the
+  image, and the app turned it off with `HEALTHCHECK NONE`. Home Assistant's Supervisor holds
+  an app whose image has any healthcheck entry in "Starting" until a health result comes – with
+  `NONE`, never. The bridge ran fine, but the app could not be stopped or restarted from Home
+  Assistant. The image carries no healthcheck now; `compose.yaml`, the Unraid template and the
+  Synology guide set it (`status --check` every 5 minutes, as before). With a plain `docker run`:
+  `--health-cmd "garmin-intervals-bridge status --check" --health-interval 5m`. Thanks DarKen.
+
 ## 0.11.1 — 2026-10-14
 
 The web page works in Firefox, a short outage is no alarm – and a container that says
@@ -7,8 +21,8 @@ whether the bridge works.
 
 ### Added
 
-- **The container image checks itself** every 5 minutes (`status --check`, no request to
-  anyone): Docker, Portainer, Unraid and Synology show it *unhealthy* when no run came for
+- **The container checks itself** every 5 minutes (`status --check`, no request to
+  anyone; from 0.11.2 set by the compose file and the templates, not the image): Docker, Portainer, Unraid and Synology show it *unhealthy* when no run came for
   twice the expected time (about an hour; backup mode: twice `BRIDGE_BACKUP_HOURS`). A break
   Intervals asked for, and a Garmin sign-in it waits for, count as healthy – a restart would
   not help there, and the alerts tell you. The Home Assistant app leaves it out (Home

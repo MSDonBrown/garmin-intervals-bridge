@@ -73,7 +73,7 @@ from Docker Hub or as a Claude Desktop bundle; [more below](#use-it-with-an-ai-c
 | **Rule** | Only what the partner copy lacks; aligned by timestamp; idempotent | Only empty values; locked days skipped; today's running totals wait until tomorrow |
 | **Archive** | Original + partner copy of every activity, Garmin's summary, weather, gear, splits | Raw JSON of every endpoint and the watch's original wellness files (Health Snapshots included), every day |
 
-Version 0.11.1. Verified end to end on one account (fenix 8, Edge 1040); what changed
+Version 0.11.2. Verified end to end on one account (fenix 8, Edge 1040); what changed
 when is in the [CHANGELOG](CHANGELOG.md), where it goes next in the
 [roadmap](docs/ROADMAP.md).
 
@@ -478,10 +478,12 @@ keeps only Garmin's session tokens in the mounted `data/` volume
 other command just uses those tokens. If Garmin answers the login with
 429, wait an hour and try again.
 
-The compose service runs `run` and restarts with the machine. The image checks itself every 5
-minutes (`status --check`, no request to anyone): `docker ps`, Portainer, Unraid or Synology
-show the container as *unhealthy* when no run came for about an hour – not during a break
-Intervals asked for, nor while it waits for a Garmin sign-in (the alerts tell you about that).
+The compose service runs `run` and restarts with the machine. It checks itself every 5 minutes
+(`status --check`, no request to anyone; the compose file, the Unraid template and the Synology
+guide set this healthcheck): `docker ps`, Portainer, Unraid or Synology show the container as
+*unhealthy* when no run came for about an hour – not during a break Intervals asked for, nor
+while it waits for a Garmin sign-in (the alerts tell you about that). With a plain `docker run`,
+add `--health-cmd "garmin-intervals-bridge status --check" --health-interval 5m`.
 Prefer cron? Leave
 the service stopped and schedule `docker compose run --rm -T bridge watch --apply`
 every 5 minutes and `... sync --apply` every 30 minutes instead.

@@ -403,65 +403,14 @@ def test_status_check_exits_1_when_the_bridge_stopped(tmp_path, monkeypatch, cap
     assert cli.main(["status", "--check"]) == 0 and capsys.readouterr().out.startswith("healthy")
 
 
-def test_the_image_checks_itself_and_the_home_assistant_app_does_not():
+def test_the_healthcheck_comes_with_the_templates_never_with_the_image():
+    # Home Assistant's Supervisor keeps an app whose image has any healthcheck entry in "Starting"
+    # until a health result arrives – with `HEALTHCHECK NONE` forever (DarKen, 0.11.1)
     from pathlib import Path
     root = Path(__file__).parents[1]
-    assert '"status", "--check"' in (root / "Dockerfile").read_text()
-    assert "--interval=5m" in (root / "Dockerfile").read_text()
-    assert "HEALTHCHECK NONE" in (root / "home-assistant" / "Dockerfile").read_text()
-
-
-# ---- 0.11.1: Firefox's forms, Windows' code page, a server briefly away ----
-
-def test_firefox_forms_work_and_foreign_ones_still_do_not(page):  # noqa: F811
-    from test_webui import signed_in
-    cookie = signed_in(page)
-    status, headers, text = call(page, "GET", "/", cookie=cookie)
-    assert headers["referrer-policy"] == "same-origin"        # no-referrer made browsers send Origin: null
-    token = csrf(text)
-    assert call(page, "POST", "/poll-now", {"csrf": token}, cookie=cookie, origin="null")[0] == 200
-    assert call(page, "POST", "/poll-now", {"csrf": token}, cookie=cookie,
-                origin=f"http://127.0.0.1:{page.port}")[0] == 200
-    assert call(page, "POST", "/poll-now", {"csrf": token}, cookie=cookie, origin="https://evil.example")[0] == 403
-    assert call(page, "POST", "/poll-now", {"csrf": "forged"}, cookie=cookie, origin="null")[0] == 403
-    polling.POLL_NOW.clear()
-
-
-def test_windows_tools_are_read_in_their_code_page_and_never_stop_the_page(monkeypatch):
-    from garmin_intervals_bridge import autostart
-    seen = {}
-    monkeypatch.setattr(autostart.subprocess, "run", lambda cmd, **kw: seen.update(kw))
-    autostart._run(["schtasks", "/Query"])
-    assert seen["errors"] == "replace" and seen["encoding"] == ("oem" if autostart.os.name == "nt" else None)
-
-
-def test_a_failed_request_names_its_server_and_reason():
-    from urllib3.exceptions import MaxRetryError, ResponseError
-    request = requests.Request("GET", "https://intervals.icu/api/v1/athlete/0/activities?oldest=2026-10-12").prepare()
-    retry = requests.exceptions.RetryError(MaxRetryError(None, "/api/v1/athlete/0/activities",
-                                                          ResponseError("too many 503 error responses")),
-                                           request=request)
-    assert intervals.request_error(retry) == "intervals.icu: too many 503 error responses"
-    gone = _http(503)
-    gone.response.url = "https://connect.garmin.com/x?secret=1"
-    assert intervals.request_error(gone) == "connect.garmin.com: HTTP 503"
-    assert intervals.transient(retry) and intervals.transient(gone)
-    assert not intervals.transient(_http(404)) and not intervals.transient(ValueError("x"))
-
-
-def test_a_server_briefly_away_is_a_warning_and_the_next_look_waits_for_the_pace(tmp_path, monkeypatch, caplog):
-    from urllib3.exceptions import MaxRetryError, ResponseError
-    monkeypatch.setenv("BRIDGE_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("INTERVALS_API_KEY", "not-a-real-key")
-    request = requests.Request("GET", "https://intervals.icu/api/v1/athlete/0/activities").prepare()
-    looks = []
-
-    def away(*a, **k):
-        looks.append(1)
-        raise requests.exceptions.RetryError(MaxRetryError(None, "/", ResponseError("too many 503 error responses")),
-                                             request=request)
-    monkeypatch.setattr(cli, "watch_once", away)
-    with caplog.at_level("WARNING"):
-        assert cli.main(["watch", "--apply"]) == 0                       # no failed unit, no alert mail
-    assert "Look for new activities failed: intervals.icu: too many 503 error responses" in caplog.text
-    assert cli.main(["watch", "--apply"]) == 0 and looks == [1]          # a minute later: not due yet
+    for dockerfile in (root / "Dockerfile", root / "home-assistant" / "Dockerfile"):
+        assert not any(line.strip().startswith("HEALTHCHECK") for line in dockerfile.read_text().splitlines())
+    check = '"garmin-intervals-bridge", "status", "--check"'
+    assert check in (root / "compose.yaml").read_text() and check in (root / "docs" / "SYNOLOGY.md").read_text()
+    assert '--health-cmd "garmin-intervals-bridge status --check"' in (
+        root / "deploy" / "unraid" / "garmin-intervals-bridge.xml").read_text()

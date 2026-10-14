@@ -8,10 +8,9 @@ USER bridge
 ENV BRIDGE_DATA_DIR=/data GARMIN_TOKEN_DIR=/data/tokens BRIDGE_IN_CONTAINER=1
 # the web page, when BRIDGE_UI_PORT=8765 and BRIDGE_UI_PASSWORD are set
 EXPOSE 8765
-# Still working? A run within twice the expected time – no request to anyone (`status --check`).
-# A break Intervals asked for, or a Garmin sign-in it waits for, count as healthy.
-HEALTHCHECK --interval=5m --timeout=30s --start-period=2m --retries=3 \
-    CMD ["garmin-intervals-bridge", "status", "--check"]
+# No HEALTHCHECK in the image: Home Assistant's Supervisor holds an app built on it in "Starting"
+# until a health result comes – forever with `HEALTHCHECK NONE`. compose.yaml and the Unraid
+# template set it: `status --check`, every 5 minutes.
 ENTRYPOINT ["garmin-intervals-bridge"]
 # `run`: polls, full runs, the daily health check – a dry run until the command says --apply
 CMD ["run"]

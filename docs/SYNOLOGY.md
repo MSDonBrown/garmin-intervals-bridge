@@ -51,6 +51,12 @@ services:
       - ./data:/data
     restart: unless-stopped
     init: true
+    healthcheck:                     # Container Manager shows whether the bridge still works
+      test: ["CMD", "garmin-intervals-bridge", "status", "--check"]
+      interval: 5m
+      timeout: 30s
+      start_period: 2m
+      retries: 3
 ```
 
 Change three values in quotes: your **API key**, your **time zone**
