@@ -366,7 +366,7 @@ def test_setup_from_nothing_to_running(_empty_home, tmp_path, monkeypatch):
                              "n",           # no swap
                              "n", "n",      # no e-mail, no push
                              "y"],          # start
-                    secrets=["wrong-key", "good-key"])
+                    secrets=["wrong-key-of-full-length", "good-key"])
     code, installed, clients = _wizard(script, monkeypatch)
     assert code == 0
     env = (_empty_home / "GarminBridge" / ".env").resolve()
@@ -570,3 +570,15 @@ def test_setup_for_a_backup_without_intervals(_empty_home, tmp_path, monkeypatch
     assert values["BRIDGE_MODE"] == "backup" and "INTERVALS_API_KEY" not in values
     said = "\n".join(script.said)
     assert "3 activities" in said and "backup --from" in said and "Intervals calendar" not in said
+
+
+def test_what_a_paste_brings_along_is_no_part_of_the_key(monkeypatch):
+    # Okocha in the forum: in the classic Windows console Ctrl+V reaches a hidden prompt as ^V
+    said = []
+    script = Script(answers=[], secrets=["\x16", "\x16\x16", '"good-key"\r\n'])
+    script.say = said.append
+    monkeypatch.setattr(wizard.os, "name", "nt")
+    key, _ = wizard._intervals_key(script, "", lambda key: WizardIntervals(key))
+    assert key == "good-key"
+    assert said.count("Nothing arrived – paste with a right-click, then Enter.") == 2
+    assert any("Paste it with a right-click" in line for line in said)

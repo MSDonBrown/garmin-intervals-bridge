@@ -85,7 +85,9 @@ class Prompt:
             self.say("Please answer y or n.")
 
     def secret(self, question: str) -> str:
-        return self._secret(f"{question}: ").strip()
+        # what a paste brings along is no part of it: in the classic Windows console Ctrl+V reaches a
+        # hidden prompt as the control character ^V, a copied line may end in a line break
+        return "".join(c for c in self._secret(f"{question}: ") if c.isprintable()).strip()
 
 
 # ---- the settings file ----
@@ -177,18 +179,25 @@ def _intervals_key(p: Prompt, saved: str, client: Callable[[str], Any]) -> tuple
             p.say(f"Could not reach intervals.icu ({type(exc).__name__}); check the internet connection.")
             return None
     p.say("Your Intervals.icu API key: intervals.icu -> Settings -> Developer Settings -> API key.\n"
-          "Copy it from there; it is not shown while you paste it, and it stays on this computer.")
+          "Copy it from there; it is not shown while you paste it, and it stays on this computer."
+          + ("\nPaste it with a right-click: in this window Ctrl+V does not reach a hidden prompt." if os.name == "nt"
+             else ""))
     for _ in range(3):
-        key = p.secret("API key")
+        key = p.secret("API key").strip("\"'").strip()          # quotes copied along are no part of it
         if not key:
+            p.say("Nothing arrived" + (" – paste with a right-click, then Enter." if os.name == "nt" else "."))
             continue
         try:
             intervals = client(key)
             name = _athlete_name(intervals.athlete())
         except requests.HTTPError as exc:
             status = getattr(exc.response, "status_code", None)
-            p.say("Intervals refused this key; check that it is complete." if status in (401, 403)
-                  else f"Intervals answered with an error ({status}); try again.")
+            if status in (401, 403) and len(key) < 16:
+                p.say(f"Intervals refused it – only {len(key)} characters arrived, an API key is longer."
+                      + (" Paste with a right-click, then Enter." if os.name == "nt" else ""))
+            else:
+                p.say("Intervals refused this key; check that it is complete." if status in (401, 403)
+                      else f"Intervals answered with an error ({status}); try again.")
             continue
         except requests.RequestException as exc:
             p.say(f"Could not reach intervals.icu ({type(exc).__name__}); check the internet connection.")

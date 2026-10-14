@@ -27,6 +27,11 @@ whether the bridge works.
   On a German Windows it comes in the console's code page ("ä" is byte 0x84), which ended in
   a `UnicodeDecodeError` in the console. It is read in that code page now, and an odd byte
   never stops anything. Thanks No_Cheetah.
+- **`setup` on Windows:** in the classic PowerShell window Ctrl+V does not paste into the
+  hidden API-key prompt but types the control character ^V, so Intervals refused the "key".
+  Control characters, line breaks and quotes a paste brings along are dropped now; the prompt
+  says to paste with a right-click, and when too little arrived, it says so. Thanks Okocha in
+  the forum.
 - **A server briefly away:**
   - A failed look for new activities counts for the pace. During an outage the bridge
     tries again at the planned pace (at night every 30 minutes), not every minute.
