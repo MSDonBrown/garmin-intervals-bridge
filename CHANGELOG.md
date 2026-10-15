@@ -36,6 +36,8 @@
 
 ### Changed
 
+- **Python 3.14 and 3.15:** the tests run on them too (Linux; 3.15 also on the Mac), and the
+  package says so.
 - **Home Assistant app:** the web page's *Log* said "No log file". The app now keeps the
   bridge's rotated log file (5 MB, three old ones kept) as `bridge.log` in its data folder, so
   the page shows the log with date and time. The app's own *Log* tab is unchanged (thanks
