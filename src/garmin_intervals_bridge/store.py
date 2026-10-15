@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
+from . import __version__
+
 ACTIVITY_STATUSES = ("downloaded", "pending", "uploaded", "remote_exists", "failed", "skipped")
 
 # States a later *failure* must never downgrade: an upload whose outcome is
@@ -200,8 +202,10 @@ class Store:
         return self.base / "fits" / f"{garmin_id}.fit"
 
     def record_run(self, command: str, metrics: dict, started: float | None = None) -> None:
+        # which version ran it: the web page may be an older process than the bridge
         self.db.execute("INSERT INTO runs (command, started, metrics) VALUES (?,?,?)",
-                        (command, started or time.time(), json.dumps(metrics, default=str)))
+                        (command, started or time.time(),
+                         json.dumps({**metrics, "version": __version__}, default=str)))
         self.db.execute("DELETE FROM runs WHERE started < ?", (time.time() - 30 * 86400,))
         self.db.commit()
 

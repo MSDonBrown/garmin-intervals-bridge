@@ -21,6 +21,14 @@
   `BRIDGE_ALLOW_ADMIN=true`. With UAC off, where every window runs alike, nothing changes.
   The Windows guide says how to repair a folder and task from before (thanks Okocha in the
   forum).
+- **The web page after an update:** a page opened with `ui` before the update is a process of
+  its own and kept showing the old version – while the background bridge, restarted by
+  `autostart`, already ran the new one. The page now notices that a newer version is installed
+  and says how to open it anew; the status shows the version of the bridge's last run when it
+  differs; the update hint names the commands for this computer (pip, `autostart`, the page);
+  and a second `ui` whose port is still taken by the old page says so instead of
+  "Address already in use" (on Windows two pages could even share the port). Thanks
+  Lukasz_Pludowski.
 - **A scheduler command that fails** (`schtasks`, `launchctl`, `systemctl`) shows what the tool
   said – "Access is denied", say – not only its exit status; for `schtasks /Create` with how to
   clear up a task an administrator window set up. A restart from the web page that fails is

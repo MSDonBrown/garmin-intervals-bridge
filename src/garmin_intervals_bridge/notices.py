@@ -62,7 +62,7 @@ def update_finding(settings: Any, *, in_container: bool, session: Any = None) ->
         return None
     how = ("pull the image futurewebat/garmin-intervals-bridge:latest and recreate the container" if in_container
            else "python -m pip install --upgrade garmin-intervals-bridge, then restart it "
-                "(log out and in, or: garmin-intervals-bridge autostart)")
+                "(log out and in, or: garmin-intervals-bridge autostart), and an open web page too")
     return {"alert": False, "what": f"update available: {latest}",
             "detail": f"this is {__version__}; to update: {how}"}
 

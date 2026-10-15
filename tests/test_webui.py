@@ -403,3 +403,43 @@ def test_how_to_swap_is_set_on_the_settings_page(page, env):
                                      "swap_method": "upload"}, cookie=cookie)
     values = config.parse_env_file(env)
     assert values["BRIDGE_SWAP"] == "true" and values["BRIDGE_SWAP_METHOD"] == "upload"
+
+
+# ---- after an update: the page that still runs the old version says so ----
+
+def test_a_page_older_than_what_is_installed_says_so(page, monkeypatch):
+    monkeypatch.setattr(webui, "installed_version", lambda: "99.0.0")
+    text = call(page, "GET", "/", cookie=signed_in(page))[2]
+    assert "This page still runs" in text and "99.0.0 is installed" in text
+    assert "Ctrl+C in the window where it runs" in text and " ui</code> again" in text
+    monkeypatch.setattr(webui, "installed_version", lambda: "0.1.1")    # an editable install's stale number
+    assert "This page still runs" not in call(page, "GET", "/", cookie=signed_in(page))[2]
+
+
+def test_the_update_hint_names_the_steps_and_the_bridges_own_version_shows(page, monkeypatch):
+    monkeypatch.setenv("BRIDGE_UPDATE_CHECK", "true")
+    monkeypatch.setattr(webui, "installed_version", lambda: None)
+    page.newer_release = lambda: "99.0.0"
+    store = Store(page.settings().data_dir)
+    store.record_run("watch", {})
+    assert store.recent_runs(1)[-1]["metrics"]["version"] == webui.__version__     # each run says which version
+    store.db.execute("INSERT INTO runs (command, started, metrics) VALUES ('watch', ?, ?)",
+                     (time.time() + 1, json.dumps({"version": "0.11.2"})))
+    store.db.commit()
+    store.close()
+    text = call(page, "GET", "/", cookie=signed_in(page))[2]
+    assert "Version 99.0.0 is out" in text and "-m pip install --upgrade garmin-intervals-bridge</code>" in text
+    assert " autostart</code> (restarts the background bridge)" in text and "this page: Ctrl+C" in text
+    assert "the bridge's last run: 0.11.2" in text
+
+
+def test_ui_says_when_its_port_is_taken(capsys):
+    import socket
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen(1)
+    try:
+        assert webui.serve(port=taken.getsockname()[1], open_browser=False) == 1
+    finally:
+        taken.close()
+    assert "is in use – most likely by a page of the bridge that is still open" in capsys.readouterr().err

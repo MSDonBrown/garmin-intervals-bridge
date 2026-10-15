@@ -19,12 +19,14 @@ that says so.
 """
 from __future__ import annotations
 
+import errno
 import hmac
 import html
 import logging
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 import webbrowser
@@ -53,6 +55,7 @@ from .health import silent_error_checks
 from .intervals import IntervalsClient
 from .store import InstanceBusy, Store, single_instance
 from .sync import restore_intake
+from .wizard import command_name
 
 log = logging.getLogger(__name__)
 
@@ -132,6 +135,26 @@ animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 """
 GARMIN_WAIT = 2.0                          # a quick Garmin answer is shown at once; a slow one gets a waiting page
 GARMIN_REFRESH = 2                         # seconds between the waiting page's reloads (a meta refresh: no script)
+
+
+def installed_version() -> str | None:
+    """The version pip has installed now – newer than this process's after an update while it ran."""
+    try:
+        from importlib.metadata import version
+        return version("garmin-intervals-bridge")
+    except Exception:
+        return None
+
+
+def _newer(a: str, b: str) -> bool:
+    """Release a after b; anything else (an editable install's stale number, say: older) is not."""
+    mine, theirs = notices._version(a), notices._version(b)
+    return mine is not None and theirs is not None and mine > theirs
+
+
+def _home_short(path: str) -> str:
+    home = str(Path.home())
+    return "~" + path[len(home):] if path.startswith(home + os.sep) else path
 
 
 def esc(value: Any) -> str:
@@ -240,6 +263,18 @@ class UI:
             return None
         return session
 
+    def _how_to_update(self) -> str:
+        if self.ingress:
+            return "Update the app in Home Assistant (<i>Settings → Apps</i>)."
+        if autostart.platform() == "container":
+            return "Pull the new image and recreate the container."
+        cmd = command_name()
+        pip = "py -m pip" if autostart.platform() == "windows" else f"{_home_short(sys.executable)} -m pip"
+        page = ("" if self.in_run else f" – and this page: Ctrl+C in the window where it runs, then "
+                                       f"<code>{esc(cmd)} ui</code>")
+        return (f"Update: <code>{esc(pip)} install --upgrade garmin-intervals-bridge</code>, then "
+                f"<code>{esc(cmd)} autostart</code> (restarts the background bridge){page}.")
+
     def update_available(self) -> str | None:
         """PyPI at most once a day, and only when the update check is on."""
         checked, latest = self._update
@@ -281,12 +316,17 @@ class UI:
         settings = self.settings()
         parts: list[str] = [note] if note else []
         latest = self.update_available()
-        if latest:
-            how = ("Pull the new image and recreate the container." if autostart.platform() == "container" else
-                   "Update: <code>python -m pip install --upgrade garmin-intervals-bridge</code>, then restart "
-                   "the bridge.")
+        installed = installed_version()
+        if installed and _newer(installed, __version__):
+            # updated, but this page is the process started before: it still runs the old code
+            how = ("restart the bridge, which serves it" if self.in_run else
+                   f"press Ctrl+C in the window where it runs (or close that window), then "
+                   f"<code>{esc(command_name())} ui</code> again")
+            parts.append(f'<section><b class="warn">This page still runs {esc(__version__)}</b>, but '
+                         f'{esc(installed)} is installed: {how}.</section>')
+        elif latest:
             parts.append(f'<section><b class="warn">Version {esc(latest)} is out</b> (this is '
-                         f'{esc(__version__)}). {how}</section>')
+                         f'{esc(__version__)}). {self._how_to_update()}</section>')
         store = Store(settings.data_dir)
         try:
             now = time.time()
@@ -299,7 +339,10 @@ class UI:
             if alive and not tokens:
                 line = '<b class="warn">Waiting for the Garmin sign-in</b> &middot; <a href="/garmin">sign in</a>'
 
-            rows = [("Bridge", line), ("Version", esc(__version__))]
+            ran = str((runs[-1]["metrics"] or {}).get("version") or "") if runs else ""
+            version = esc(__version__) + (f" &middot; the bridge's last run: {esc(ran)}"
+                                          if ran and ran != __version__ else "")
+            rows = [("Bridge", line), ("Version", version)]
             kind = autostart.platform()
             if not self.in_run and kind != "container" and settings.env_file is not None:
                 state = autostart.status(settings.env_file)
@@ -1089,6 +1132,8 @@ def check(host: str, password: str | None, in_run: bool) -> None:
 class _Server(ThreadingHTTPServer):
     """At most MAX_CONNECTIONS requests at once; one more is closed instead of getting a thread."""
     daemon_threads = True
+    # Windows' SO_REUSEADDR lets a second process bind a port in use – two pages, either one answering
+    allow_reuse_address = os.name != "nt"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1122,7 +1167,15 @@ def serve(*, host: str = "127.0.0.1", port: int = DEFAULT_PORT, open_browser: bo
     password = os.getenv("BRIDGE_UI_PASSWORD") or None
     check(host, password, in_run=False)
     ui = UI(host=host, port=port, password=password, key=None if password else secrets.token_urlsafe(24))
-    server = make_server(ui)
+    try:
+        server = make_server(ui)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE and getattr(exc, "winerror", None) != 10048:
+            raise
+        print(f"Port {port} is in use – most likely by a page of the bridge that is still open, perhaps one "
+              f"started before an update. Press Ctrl+C in its window (or close that window) and start this "
+              f"again; or one on another port: {command_name()} ui --port {port + 1}", file=sys.stderr)
+        return 1
     shown = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{shown}:{ui.port}/" + (f"?key={ui.key}" if ui.key else "")
     print(f"The bridge's page: {url}\n(Ctrl+C closes it; the bridge itself keeps running in the background.)")

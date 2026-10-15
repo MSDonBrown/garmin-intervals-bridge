@@ -117,7 +117,10 @@ venv/bin/pip install --upgrade garmin-intervals-bridge
 venv/bin/garmin-intervals-bridge autostart
 ```
 
-The last line restarts the background bridge with the new version.
+The last line restarts the background bridge with the new version. A web page
+that is open (`ui`) is a process of its own: press Ctrl+C in its window and
+start it again, or it keeps showing the old version (it says so itself from
+0.11.4 on).
 
 ## If something goes wrong
 
