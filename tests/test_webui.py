@@ -3,6 +3,7 @@ import http.client
 import json
 import re
 import threading
+import time
 from urllib.parse import urlencode
 
 import pytest
@@ -147,6 +148,35 @@ def test_garmin_sign_in_with_mfa_ends_the_login_episode(page, env):
     store = Store(settings.data_dir)
     assert not store.get_meta(notices.LOGIN_NOTE_KEY) and store.meta_updated("garmin_last_ok")
     store.close()
+
+
+def test_a_slow_garmin_sign_in_shows_a_page_that_waits_for_it(page, env, monkeypatch):
+    gate = threading.Event()
+
+    class SlowGarmin(FakeGarmin):
+        def start_login(self, email, password):
+            gate.wait(10)
+            return super().start_login(email, password)
+
+    page.garmin_source = SlowGarmin
+    monkeypatch.setattr(webui, "GARMIN_WAIT", 0.05)
+    cookie = signed_in(page)
+    token = csrf(call(page, "GET", "/garmin", cookie=cookie)[2])
+    status, headers, _ = call(page, "POST", "/garmin", {"csrf": token, "email": "ann@example.com",
+                                                        "password": GARMIN_PASSWORD}, cookie=cookie)
+    assert status == 303 and headers["location"] == "/garmin"            # a GET to reload, never the form again
+    text = call(page, "GET", "/garmin", cookie=cookie)[2]
+    assert "Signing in to Garmin Connect" in text and 'http-equiv=refresh' in text and GARMIN_PASSWORD not in text
+    assert call(page, "POST", "/garmin", {"csrf": token, "email": "x@example.com", "password": "x"},
+                cookie=cookie)[0] == 303                                 # one sign-in at a time
+    gate.set()
+    for _ in range(100):
+        text = call(page, "GET", "/garmin", cookie=cookie)[2]
+        if "Signing in" not in text:
+            break
+        time.sleep(0.05)
+    assert "accepted the e-mail and password" in text and 'name="code"' in text and "http-equiv" not in text
+    assert 'name="code"' in call(page, "GET", "/garmin", cookie=cookie)[2]   # a reload keeps asking for the code
 
 
 def test_settings_are_saved_and_the_key_is_checked_but_never_shown(page, env):

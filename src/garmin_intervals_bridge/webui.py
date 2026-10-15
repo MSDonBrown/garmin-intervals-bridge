@@ -83,19 +83,55 @@ INGRESS_HEADERS = {**HEADERS, "X-Frame-Options": "SAMEORIGIN",
                    "Content-Security-Policy": HEADERS["Content-Security-Policy"].replace(
                        "frame-ancestors 'none'", "frame-ancestors 'self'")}
 STYLE = """
-body{font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f6f7f9;color:#1d2330}
-header{background:#1d2330;color:#fff;padding:10px 16px}header a{color:#cfd6e4;margin-right:14px;text-decoration:none}
-header b{margin-right:22px}main{max-width:780px;margin:0 auto;padding:16px}
-section{background:#fff;border:1px solid #dde1e8;border-radius:8px;padding:12px 16px;margin:0 0 14px}
-h1{font-size:20px;margin:6px 0 12px}h2{font-size:16px;margin:4px 0 8px}
-.ok{color:#17803d}.warn{color:#a35c00}.bad{color:#b42318}.muted{color:#667085}
-table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:3px 8px 3px 0;vertical-align:top}
-input[type=text],input[type=password],input[type=email]{width:100%;max-width:360px;padding:6px;font:inherit}
-button{font:inherit;padding:6px 14px;border-radius:6px;border:1px solid #1d2330;background:#1d2330;color:#fff}
-button.light{background:#fff;color:#1d2330}form.inline{display:inline}
-pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#f0f2f5;padding:8px;border-radius:6px}
-label{display:block;margin:6px 0}
+:root{--bg:#f4f6f9;--fg:#1d2330;--card:#fff;--line:#e1e5eb;--field:#c9cfd8;--code:#f0f2f5;--accent:#1f6feb;
+--accent-fg:#fff;--ok:#17803d;--warn:#a35c00;--bad:#b42318;--muted:#667085;--head:#1d2330;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--fg:#e4e7ec;--card:#1b1f25;--line:#2c323b;--field:#3d4550;
+--code:#242931;--accent:#4c8dff;--accent-fg:#0b0d10;--ok:#4cc27a;--warn:#e5a54b;--bad:#f07a6f;--muted:#98a2b3;
+--head:#0b0d10}}
+*{box-sizing:border-box}
+body{font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--bg);color:var(--fg);
+overflow-wrap:anywhere}
+header{background:var(--head);color:#fff;padding:0 16px;display:flex;flex-wrap:wrap;column-gap:18px;align-items:center}
+header b{padding:12px 6px 12px 0}
+header a{color:#b9c2d3;text-decoration:none;padding:12px 0 10px;border-bottom:2px solid transparent}
+header a:hover{color:#fff}header a[aria-current]{color:#fff;border-color:var(--accent)}
+main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+a{color:var(--accent)}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:0 0 16px}
+section>:first-child,form>:first-child{margin-top:0}section>:last-child{margin-bottom:0}
+h1{font-size:22px;margin:0 0 16px}h2{font-size:16px;margin:0 0 8px}
+p{margin:0 0 10px}ul{margin:0;padding-left:20px}li{margin:4px 0}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.muted{color:var(--muted)}
+main>p.ok,main>p.warn,main>p.bad{background:var(--card);border:1px solid var(--line);border-left:4px solid;
+border-radius:10px;padding:12px 16px;margin:0 0 16px;background:color-mix(in srgb,currentColor 7%,var(--card))}
+p+form,form+p{margin-top:16px}
+table{border-collapse:collapse;width:100%}
+td,th{text-align:left;padding:9px 12px 9px 0;vertical-align:top;border-top:1px solid var(--line)}
+tr:first-child>td,tr:first-child>th{border-top:0;padding-top:0}tr:last-child>td,tr:last-child>th{padding-bottom:0}
+th{font-weight:600;white-space:nowrap;width:1%;padding-right:24px}
+section>table th{color:var(--muted);font-weight:500}
+label{display:block;margin:0 0 14px;font-weight:500}
+label>input:not([type=checkbox]){display:block;width:100%;max-width:440px;margin-top:5px;font:inherit;font-weight:400;
+padding:8px 10px;border:1px solid var(--field);border-radius:6px;background:var(--card);color:var(--fg)}
+label>input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+label:has(>input[type=checkbox]){display:flex;gap:10px;align-items:flex-start;font-weight:400;margin-bottom:10px}
+input[type=checkbox]{flex:none;width:16px;height:16px;margin:3px 0 0;accent-color:var(--accent)}
+form h2{margin:24px -20px 12px;padding:16px 20px 0;border-top:1px solid var(--line)}form h2+p{margin-top:-4px}
+button{font:inherit;font-weight:600;padding:8px 18px;border-radius:6px;border:1px solid var(--accent);
+background:var(--accent);color:var(--accent-fg);cursor:pointer}
+button:hover{filter:brightness(1.08)}button:active{transform:translateY(1px)}
+button.light{background:transparent;color:var(--accent);padding:5px 12px}
+form.inline{display:inline-block;margin-left:6px}
+section>form>button,label+button{margin-top:4px}
+code{font-size:13px;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--code);padding:10px 12px;
+border-radius:6px;margin:0}
+.busy{display:flex;gap:14px;align-items:center}.busy p{margin:0}
+.spin{flex:none;width:24px;height:24px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;
+animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 """
+GARMIN_WAIT = 2.0                          # a quick Garmin answer is shown at once; a slow one gets a waiting page
+GARMIN_REFRESH = 2                         # seconds between the waiting page's reloads (a meta refresh: no script)
 
 
 def esc(value: Any) -> str:
@@ -121,9 +157,30 @@ class Session:
         self.created = time.time()
         self.garmin: Any = None                      # a sign-in waiting for its MFA code
         self.garmin_since = 0.0
+        self.garmin_job: GarminJob | None = None     # a sign-in step talking to Garmin right now
         self.gear_plan: dict | None = None           # the plan shown, applied exactly as shown
         self.gear_options: dict = {}
         self.activity: tuple[str, str] | None = None  # (Garmin id, Intervals id) shown, to fill in again
+
+
+class GarminJob:
+    """One sign-in step (the password, or the MFA code) running beside the page: Garmin can take
+    half a minute, and the page shows that it is waiting instead of hanging."""
+
+    def __init__(self, step: str, work: Callable[[], Any]):
+        self.step, self.started = step, time.time()
+        self.outcome: Any = None
+        self.error: Exception | None = None
+        self.done = threading.Event()
+        threading.Thread(target=self._run, args=(work,), name="garmin-sign-in", daemon=True).start()
+
+    def _run(self, work: Callable[[], Any]) -> None:
+        try:
+            self.outcome = work()
+        except Exception as exc:
+            self.error = exc
+        finally:
+            self.done.set()
 
 
 class Reply(Exception):
@@ -196,16 +253,20 @@ class UI:
 
     # ---- the pages ----
 
-    def page(self, session: Session | None, title: str, body: str) -> str:
+    def page(self, session: Session | None, title: str, body: str, refresh: int = 0) -> str:
         nav = ""
         if session is not None:
-            nav = "".join(f'<a href="{href}">{label}</a>' for href, label in (
+            here = {"Status": "Status", "Garmin Connect": "Garmin", "Settings": "Settings", "Actions": "Actions",
+                    "Log": "Log"}.get(title)
+            nav = "".join(f'<a href="{href}"{" aria-current=page" if label == here else ""}>{label}</a>'
+                          for href, label in (
                 ("/", "Status"), ("/garmin", "Garmin"), ("/settings", "Settings"), ("/actions", "Actions"),
                 ("/log", "Log")))
             if self.password:
                 nav += '<a href="/logout">Sign out</a>'
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
                 f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+                f'{f"<meta http-equiv=refresh content={refresh}>" if refresh else ""}'
                 f'<title>{esc(title)} - Garmin Intervals Bridge</title><style>{STYLE}</style></head>'
                 f'<body><header><b>Garmin &rarr; Intervals Bridge</b>{nav}</header><main><h1>{esc(title)}</h1>'
                 f'{body}</main></body></html>')
@@ -347,41 +408,96 @@ class UI:
                 '<label>Garmin Connect e-mail <input type="email" name="email" autocomplete="username" required>'
                 '</label><label>Password <input type="password" name="password" autocomplete="current-password" '
                 'required></label>'), "Sign in")
+            if not message:
+                message = self._garmin_now()
         return self.page(session, "Garmin Connect", f'{message}<section><p>Your password goes to Garmin for this '
                          'sign-in only and is not stored; the bridge keeps the session, which renews itself for '
                          f'about a year.</p>{warning}{body}</section>')
 
+    def _garmin_now(self) -> str:
+        """Whether the bridge is signed in already: the form is then only to replace that session."""
+        settings = self.settings()
+        if not (settings.token_dir.is_dir() and any(settings.token_dir.glob("*.json"))):
+            return ""
+        store = Store(settings.data_dir)
+        try:
+            if store.get_meta(notices.LOGIN_NOTE_KEY):
+                return '<p class="bad"><b>Garmin wants a new sign-in.</b> The saved session no longer works.</p>'
+            ok = store.meta_updated("garmin_last_ok")
+        finally:
+            store.close()
+        return (f'<p class="ok"><b>Signed in</b> &middot; last confirmed {esc(_ago(ok))}. Sign in again only to '
+                'replace this session.</p>')
+
+    def garmin_get(self, session: Session, query: dict, form: dict) -> str:
+        if session.garmin_job is not None:
+            return self._garmin_result(session)
+        if session.garmin is not None and time.time() - session.garmin_since <= PENDING_SECONDS:
+            return self.garmin_page(session, mfa=True)                  # still waiting for the code
+        return self.garmin_page(session)
+
     def garmin_post(self, session: Session, query: dict, form: dict) -> str:
+        if session.garmin_job is not None and not session.garmin_job.done.is_set():
+            raise Reply(303, "", {"Location": "/garmin"})              # one sign-in at a time: show that one
         settings = self.settings()
         garmin = self.garmin_source(settings.token_dir, settings.garmin_request_delay)
-        try:
-            outcome = garmin.start_login(form.get("email", "").strip(), form.get("password", ""))
-        except GarminBlocked:
-            return self.garmin_page(session, '<p class="bad">Garmin limits sign-ins right now (429). Wait an hour, '
-                                             'then try again.</p>')
-        except Exception as exc:
-            name = type(exc).__name__
-            text = ("Garmin did not accept this e-mail and password." if "Authentication" in name
-                    else f"The sign-in failed ({esc(name)}).")
-            return self.garmin_page(session, f'<p class="bad">{text}</p>')
-        if outcome == "mfa":
-            session.garmin, session.garmin_since = garmin, time.time()
-            return self.garmin_page(session, "", mfa=True)
-        return self._signed_in(session, settings)
+        email, password = form.get("email", "").strip(), form.get("password", "")
+        session.garmin = None
+        session.garmin_job = GarminJob("password", lambda: (garmin, garmin.start_login(email, password)))
+        return self._garmin_result(session, wait=True)
 
     def garmin_mfa(self, session: Session, query: dict, form: dict) -> str:
-        settings = self.settings()
+        if session.garmin_job is not None and not session.garmin_job.done.is_set():
+            raise Reply(303, "", {"Location": "/garmin"})
         garmin = session.garmin
         if garmin is None or time.time() - session.garmin_since > PENDING_SECONDS:
             session.garmin = None
             return self.garmin_page(session, '<p class="warn">That took too long; please sign in again.</p>')
-        try:
-            garmin.finish_login(form.get("code", ""))
-        except Exception as exc:
-            return self.garmin_page(session, f'<p class="bad">Garmin did not accept the code '
-                                             f'({esc(type(exc).__name__)}); try again.</p>', mfa=True)
-        session.garmin = None
-        return self._signed_in(session, settings)
+        code = form.get("code", "")
+        session.garmin_job = GarminJob("code", lambda: (garmin, garmin.finish_login(code)))
+        return self._garmin_result(session, wait=True)
+
+    def _garmin_result(self, session: Session, wait: bool = False) -> str:
+        """The finished sign-in step's answer, or a page that says Garmin is still being asked."""
+        job = session.garmin_job
+        assert job is not None
+        if wait:
+            job.done.wait(GARMIN_WAIT)
+        if not job.done.is_set():
+            if wait:                                    # a GET from here on: reloading it never sends the form again
+                raise Reply(303, "", {"Location": "/garmin"})
+            seconds = time.time() - job.started
+            if seconds > PENDING_SECONDS:
+                session.garmin_job = None
+                return self.garmin_page(session, '<p class="bad">Garmin has not answered for ten minutes; try again '
+                                                 'later.</p>')
+            what = "Signing in to Garmin Connect" if job.step == "password" else "Checking the code with Garmin"
+            return self.page(session, "Garmin Connect", f'<section class="busy"><div class="spin"></div><div><p><b>'
+                             f'{what}&hellip;</b> {int(seconds)} s so far</p><p class="muted">Garmin often takes '
+                             'up to half a minute. This page updates by itself.</p></div></section>',
+                             refresh=GARMIN_REFRESH)
+        session.garmin_job = None
+        exc = job.error
+        if job.step == "code":
+            if exc is not None:
+                return self.garmin_page(session, f'<p class="bad">Garmin did not accept the code '
+                                                 f'({esc(type(exc).__name__)}); try again.</p>', mfa=True)
+            session.garmin = None
+            return self._signed_in(session, self.settings())
+        if isinstance(exc, GarminBlocked):
+            return self.garmin_page(session, '<p class="bad">Garmin limits sign-ins right now (429). Wait an hour, '
+                                             'then try again.</p>')
+        if exc is not None:
+            name = type(exc).__name__
+            text = ("Garmin did not accept this e-mail and password." if "Authentication" in name
+                    else f"The sign-in failed ({esc(name)}).")
+            return self.garmin_page(session, f'<p class="bad">{text}</p>')
+        garmin, outcome = job.outcome
+        if outcome == "mfa":
+            session.garmin, session.garmin_since = garmin, time.time()
+            return self.garmin_page(session, '<p class="ok">Garmin accepted the e-mail and password and sent you a '
+                                             'code (by e-mail or in its app).</p>', mfa=True)
+        return self._signed_in(session, self.settings())
 
     def _signed_in(self, session: Session, settings: Settings) -> str:
         store = Store(settings.data_dir)
@@ -391,8 +507,8 @@ class UI:
             store.close()
         notices.SIGNED_IN.set()
         soon = "goes on with it at once" if self.in_run else "uses it within 15 minutes"
-        return self.page(session, "Garmin Connect", f'<section><p class="ok"><b>Signed in.</b> The session is saved; '
-                         f'the running bridge {soon}.</p><p><a href="/">Back to the status</a></p></section>')
+        return self.page(session, "Garmin Connect", f'<p class="ok"><b>Signed in.</b> The session is saved; the '
+                         f'running bridge {soon}.</p><p><a href="/">Back to the status</a></p>')
 
     # -- settings --
 
@@ -794,7 +910,7 @@ class UI:
                          '</form></section>')
 
 
-GET_PAGES = {"/": "status", "/garmin": "garmin", "/settings": "settings", "/actions": "actions", "/log": "log_page"}
+GET_PAGES = {"/": "status", "/garmin": "garmin_get", "/settings": "settings", "/actions": "actions", "/log": "log_page"}
 POST_PAGES = {"/garmin": "garmin_post", "/garmin/mfa": "garmin_mfa", "/settings": "settings_post",
               "/settings/test": "alert_test",
               "/restart": "restart_post", "/actions/gear": "gear_post", "/actions/gear-apply": "gear_apply",
@@ -897,8 +1013,6 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
             name = GET_PAGES.get(path)
             if name is None:
                 raise Reply(404, "Not found")
-            if name == "garmin":
-                return ui.garmin_page(session)
             if name == "settings":
                 return ui.settings_page(session)
             if name == "actions":

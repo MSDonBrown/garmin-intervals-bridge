@@ -8,6 +8,14 @@
   bridge's rotated log file (5 MB, three old ones kept) as `bridge.log` in its data folder, so
   the page shows the log with date and time. The app's own *Log* tab is unchanged (thanks
   @pove).
+- **Web page, Garmin sign-in:** while Garmin answers (often 20–30 seconds) the page says so –
+  "Signing in to Garmin Connect…", with the seconds so far – and updates by itself (a meta
+  refresh, still no script). Wrong password, the MFA code sent, signed in: each answer shows as
+  a clear note. The Garmin page also says whether the bridge is signed in already (thanks
+  @pove).
+- **Web page:** labels above full-width fields, checkboxes whose text wraps beside them, the
+  settings in separated groups, a tidier status table, the open page marked in the menu, and a
+  dark mode that follows the system's (thanks @pove).
 
 ## 0.11.3 — 2026-10-15
 
