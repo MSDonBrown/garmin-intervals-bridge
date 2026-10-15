@@ -69,8 +69,10 @@ PowerShell window:
 | Start it again | `py -m garmin_intervals_bridge autostart` |
 
 It polls Intervals every 5 minutes, does a full run every 30 minutes and checks
-itself once a day. When the PC sleeps, it catches up after waking up. Once a
-day it also looks whether a newer version exists and says so in the log.
+itself once a day. When the PC sleeps, it catches up after waking up; when it
+was off for days, it reads back to its last run (up to two weeks) and fills in
+the days in between. Once a day it also looks whether a newer version exists
+and says so in the log.
 
 **Charts:** in Intervals.icu open the *Fitness* page, a tab, *custom charts*,
 search **Garmin Bridge** and tick what you like.

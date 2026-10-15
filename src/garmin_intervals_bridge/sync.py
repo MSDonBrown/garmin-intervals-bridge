@@ -373,17 +373,60 @@ def _sync_one_activity(activity: dict, gid: str, garmin: Any, intervals: Any, st
     log.info("Uploaded original FIT for Garmin ID %s", gid)
 
 
+CATCH_UP_DAYS = 14              # after a pause the scheduled runs look back to the last one, at most this far
+CATCH_UP_KEY = "catchup:"       # + scope: the first day a pause left to read, until a run has read it
+
+
+def note_pause(settings: Settings, store: Store, today: date) -> None:
+    """A computer switched on once a week, a server down for days, a Garmin sign-in that waited:
+    the bridge's last run is older than its usual window. Remember, for activities and wellness,
+    the first day the scheduled runs have to read again – the window as it was at the last run,
+    at most CATCH_UP_DAYS back. A new install has no last run: the usual window."""
+    last = max(store.last_run("sync") or 0, store.last_run("watch") or 0)
+    if not last:
+        return
+    last_day = datetime.fromtimestamp(last, settings.timezone).date()
+    for scope, base in (("activities", settings.activity_days), ("wellness", settings.wellness_days)):
+        start = max(last_day - timedelta(days=base - 1), today - timedelta(days=CATCH_UP_DAYS - 1))
+        if start >= today - timedelta(days=base - 1):
+            continue                                  # no pause: the usual window covers it
+        saved = store.get_meta(CATCH_UP_KEY + scope)
+        if saved and date.fromisoformat(saved) <= start:
+            continue
+        store.set_meta(CATCH_UP_KEY + scope, start.isoformat())
+        log.info("Back after a pause (last run %s): %s from %s on", last_day, scope, start)
+
+
+def catch_up_days(store: Store, scope: str, base: int, today: date) -> int:
+    """The scheduled run's lookback: `base`, or back to the first day a pause left to read."""
+    saved = store.get_meta(CATCH_UP_KEY + scope)
+    if not saved:
+        return base
+    start = max(date.fromisoformat(saved), today - timedelta(days=max(base, CATCH_UP_DAYS) - 1))
+    return max(base, (today - start).days + 1)
+
+
+def caught_up(store: Store, scope: str) -> None:
+    if store.get_meta(CATCH_UP_KEY + scope):
+        store.set_meta(CATCH_UP_KEY + scope, "")
+        log.info("Caught up: %s", scope)
+
+
 def sync_activities(settings: Settings, garmin: Any, intervals: Any, store: Store,
                     *, apply: bool, allow_upload: bool, activity_days: int | None = None,
                     today: date | None = None, date_range: tuple[date, date] | None = None,
-                    pause_seconds: float = 0.0) -> dict:
+                    pause_seconds: float = 0.0, catch_up: bool = False) -> dict:
     """Upload mode: every Garmin activity Intervals does not have is uploaded as the athlete's
-    own file. `date_range` replaces the lookback for a backfill; `pause_seconds` paces it."""
+    own file. `date_range` replaces the lookback for a backfill; `pause_seconds` paces it.
+    `catch_up` (the scheduled full runs): after a pause, back to the bridge's last run."""
     if date_range:
         start, current = date_range
     else:
         current = today or datetime.now(settings.timezone).date()
         lookback = activity_days or settings.activity_days
+        if catch_up:
+            note_pause(settings, store, current)
+            lookback = catch_up_days(store, "activities", lookback, current)
         start = current - timedelta(days=lookback - 1)
     activities = garmin.activities(start, current)
     metrics = {"seen": 0, "downloaded": 0, "remote_exists": 0, "uploaded": 0, "pending": 0,
@@ -437,12 +480,15 @@ def sync_activities(settings: Settings, garmin: Any, intervals: Any, store: Stor
             metrics["failed"] += 1
             log.warning("Activity %s failed with %s (attempt %d); retrying later with backoff",
                         gid, _error_name(exc), attempts)
+    if catch_up and not date_range and not metrics["failed"]:
+        caught_up(store, "activities")                 # a failed one keeps the window: retried in it
     return metrics
 
 def sync_enrich(settings: Settings, garmin: Any, intervals: Any, store: Store, *, apply: bool,
                 activity_days: int | None = None, today: date | None = None,
                 date_range: tuple[date, date] | None = None, pause_seconds: float = 0.0,
-                archive_only: bool = False, scan_interval_minutes: int = 0, swap: bool = False) -> dict:
+                archive_only: bool = False, scan_interval_minutes: int = 0, swap: bool = False,
+                catch_up: bool = False) -> dict:
     """Scheduled enrich mode: for every recent Garmin activity, add to the officially
     synced Intervals activity what the partner copy lacks. Never uploads, never deletes.
 
@@ -456,7 +502,10 @@ def sync_enrich(settings: Settings, garmin: Any, intervals: Any, store: Store, *
     net (late imports, retries, new field definitions) and is skipped while the last one
     is younger than this, unless a failed activity is due for its retry.
     """
-    if scan_interval_minutes and not date_range and not archive_only:
+    if catch_up and not date_range and not archive_only:
+        note_pause(settings, store, today or datetime.now(settings.timezone).date())
+    if (scan_interval_minutes and not date_range and not archive_only
+            and not store.get_meta(CATCH_UP_KEY + "activities")):     # a pause to catch up: the scan now
         last = store.meta_updated("activity_scan")
         retry_due = any(not f["next_retry"] or f["next_retry"] <= time.time() for f in store.failed_activities())
         if last and time.time() - last < scan_interval_minutes * 60 and not retry_due:
@@ -469,6 +518,8 @@ def sync_enrich(settings: Settings, garmin: Any, intervals: Any, store: Store, *
     else:
         current = today or datetime.now(settings.timezone).date()
         lookback = activity_days or settings.activity_days
+        if catch_up and not archive_only:
+            lookback = catch_up_days(store, "activities", lookback, current)
         start = current - timedelta(days=lookback - 1)
     activities = garmin.activities(start, current)
     metrics = {"seen": 0, "skipped": 0, "deferred": 0, "failed": 0, "unmatched": 0,
@@ -550,6 +601,8 @@ def sync_enrich(settings: Settings, garmin: Any, intervals: Any, store: Store, *
         _retry_overdue(garmin, intervals, store, metrics, {str(a.get("activityId")) for a in activities},
                        mappings, apply=apply)
         store.set_meta("activity_scan")
+        if catch_up:
+            caught_up(store, "activities")             # gone through; a failed one is retried by its id
     return metrics
 
 
@@ -834,7 +887,9 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
     current = now.date()
     midnight = datetime.combine(current, datetime.min.time(), tzinfo=tz)
     metrics = _wellness_metrics()
-    days = lookback or settings.wellness_days
+    base = lookback or settings.wellness_days
+    note_pause(settings, store, current)
+    days = catch_up_days(store, "wellness", base, current)       # after a pause: back to the last run
     past = [current - timedelta(days=o) for o in reversed(range(1, max(days, 1)))]
 
     if store.get_meta("wellness:since") is None:
@@ -852,6 +907,8 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
     night_key, snapshot_key = f"wellness:night:{current}", f"wellness:snapshot:{current}"
     watching = bool(morning) and store.get_meta(night_key) is not None    # a snapshot may replace the night
     pending_past = [d for d in past if store.get_meta(f"wellness:final:{d}") is None]
+    if days > base and not any(d < current - timedelta(days=base - 1) for d in pending_past):
+        caught_up(store, "wellness")                  # the days a pause left are read
     readiness_key = f"wellness:readiness:{current}"
     readiness_due = (morning == "no-readiness"
                      and int(store.get_meta(f"{readiness_key}:tries") or 0) < READINESS_RETRIES
@@ -1084,6 +1141,7 @@ def watch_once(settings: Settings, garmin: Any, intervals: Any, store: Store, *,
     then too, instead of waiting for the next full scan.
     """
     current = today or datetime.now(settings.timezone).date()
+    note_pause(settings, store, current)               # back after a pause: the full run reads it all
     if getattr(settings, "swap", False) and apply:
         from .swap import retry_deletes
         retry_deletes(intervals, store)                # copies whose delete failed last time

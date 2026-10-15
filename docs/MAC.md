@@ -83,9 +83,11 @@ says so in the log.
 
 The bridge runs while the Mac is awake. A MacBook with the lid closed
 catches up as soon as it wakes: last night's values arrive a few minutes
-after you open it, if the watch has synced. For a bridge that never sleeps,
-a Mac mini, a NAS or a small Linux box with the container image is the
-better home.
+after you open it, if the watch has synced. A Mac that is switched on only
+now and then works too: the bridge then reads back to its last run, up to two
+weeks, and fills in the days in between – give it a quarter of an hour.
+For a bridge that never sleeps, a Mac mini, a NAS or a small Linux box with
+the container image is the better home.
 
 **Charts:** in Intervals.icu open the *Fitness* page, a tab, *custom charts*,
 search **Garmin Bridge** and tick what you like.

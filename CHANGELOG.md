@@ -2,6 +2,14 @@
 
 ## 0.11.4 — unreleased
 
+### Added
+
+- **Catching up after a pause:** a computer switched on only once or twice a week, a server
+  down for days, a Garmin sign-in that waited – the first runs now read back to where the
+  bridge's last run left off, up to 14 days, so the activities and wellness days in between
+  are completed too (before, only the last 3–4 days were). A run cut short by a Garmin limit
+  or a shutdown is carried on by the next one.
+
 ### Changed
 
 - **Home Assistant app:** the web page's *Log* said "No log file". The app now keeps the

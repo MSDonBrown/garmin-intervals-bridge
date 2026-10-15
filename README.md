@@ -536,6 +536,13 @@ lot of athletes on its own servers; fewer requests are kinder to it:
 The full runs every 30 minutes go on regardless, and they read Garmin's activity list every
 two hours: nothing is missed, a slower pace only means an activity may arrive later.
 
+**After a pause** – a computer switched on once or twice a week, a server down for days, a
+Garmin sign-in that waited – the first runs read back to where the bridge's last run left
+off, up to 14 days: the activities and wellness days in between are completed as if it had
+run all along (each missed wellness day once, about 15 Garmin requests). If a run is cut short
+(Garmin limits it, the computer goes off), the next one carries on. Longer pauses: a
+`backfill`.
+
 ### When the bridge needs you
 
 Garmin's session can end (a password change, a revoked device); then nothing syncs until
@@ -568,8 +575,8 @@ win. Relative paths in a settings file count from its folder.
 | `BRIDGE_DATA_DIR` | `./data` | Originals, partner copies, raw wellness JSON, SQLite state, lock files |
 | `GARMIN_TOKEN_DIR` | `$BRIDGE_DATA_DIR/tokens` | Garmin session tokens (mode 0700) |
 | `BRIDGE_TIMEZONE` | this computer's time zone | Your local day boundary (which date last night's sleep belongs to), e.g. `Europe/London`. A container has none of its own: set it there (otherwise UTC) |
-| `BRIDGE_ACTIVITY_LOOKBACK_DAYS` | `4` | `sync` window for activities (1–30) |
-| `BRIDGE_WELLNESS_LOOKBACK_DAYS` | `3` | `sync` window for wellness (1–30) |
+| `BRIDGE_ACTIVITY_LOOKBACK_DAYS` | `4` | `sync` window for activities (1–30); after a pause back to the last run, up to 14 days |
+| `BRIDGE_WELLNESS_LOOKBACK_DAYS` | `3` | `sync` window for wellness (1–30); after a pause back to the last run, up to 14 days |
 | `BRIDGE_WELLNESS_REFRESH_HOURS` | `4` | Backfills only: how soon a backfill re-reads today or yesterday. The scheduled runs read on evidence instead (see [Wellness](#wellness)) |
 | `BRIDGE_WELLNESS_PROFILE` | `recommended` | `recommended` or `all` custom fields |
 | `BRIDGE_GARMIN_REQUEST_DELAY` | `0.5` | Seconds between Garmin requests (minimum 0.25) |

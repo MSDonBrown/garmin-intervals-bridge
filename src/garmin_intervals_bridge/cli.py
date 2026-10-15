@@ -299,13 +299,13 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 results: dict = {"apply": apply, "scope": "all", "mode": mode}
                 if mode == "upload":
                     results["activities"] = sync_activities(settings, garmin, intervals, store, apply=apply,
-                                                            allow_upload=True)
+                                                            allow_upload=True, catch_up=True)
                     gear_result = _gear_recent(settings, store, intervals, apply=apply)
                     if gear_result:
                         results["gear"] = gear_result
                 else:
                     results["activities"] = sync_enrich(settings, garmin, intervals, store, apply=apply,
-                                                        scan_interval_minutes=ACTIVITY_SCAN_MINUTES)
+                                                        scan_interval_minutes=ACTIVITY_SCAN_MINUTES, catch_up=True)
                     if not results["activities"].get("scan_skipped"):
                         gear_result = _gear_recent(settings, store, intervals, apply=apply)
                         if gear_result:
@@ -884,7 +884,7 @@ def main(argv: list[str] | None = None) -> int:
                     if args.scope in ("all", "activities") and args.mode == "enrich":
                         results["activities"] = sync_enrich(settings, garmin, intervals, store,
                             apply=args.apply, activity_days=args.activity_days,
-                            scan_interval_minutes=max(args.activity_interval, 0))
+                            scan_interval_minutes=max(args.activity_interval, 0), catch_up=True)
                         if not results["activities"].get("scan_skipped"):
                             gear_result = _gear_recent(settings, store, intervals, apply=args.apply)
                             if gear_result:
@@ -895,7 +895,7 @@ def main(argv: list[str] | None = None) -> int:
                                         "disabling Garmin auto-activity sync")
                         results["activities"] = sync_activities(settings, garmin, intervals, store,
                             apply=args.apply, allow_upload=args.allow_activity_upload,
-                            activity_days=args.activity_days)
+                            activity_days=args.activity_days, catch_up=True)
                         # gear as in enrich mode, for the uploaded originals
                         gear_result = _gear_recent(settings, store, intervals, apply=args.apply)
                         if gear_result:
