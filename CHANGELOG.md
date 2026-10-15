@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.11.3 — unreleased
+## 0.11.3 — 2026-10-15
+
+Swap mode puts the original into Garmin's copy itself – the same activity, nothing deleted.
 
 ### Added
 
@@ -18,7 +20,6 @@
 - **Swap mode replaces by default.** The previous way – upload the original as a new
   activity of your own and delete Garmin's copy – stays as `BRIDGE_SWAP_METHOD=upload` (a
   choice on the web page's settings and in the Home Assistant app).
-
 - **Charts:** a chart the bridge puts on the Fitness page (*Actions → Charts*, `setup-charts`)
   is now a copy of the same chart in Intervals' chart library, as Intervals' own *Copy* makes
   it (`from_id`): the library shows how many use it. Each copy stays your own; a later change
