@@ -442,7 +442,7 @@ def sync_activities(settings: Settings, garmin: Any, intervals: Any, store: Stor
 def sync_enrich(settings: Settings, garmin: Any, intervals: Any, store: Store, *, apply: bool,
                 activity_days: int | None = None, today: date | None = None,
                 date_range: tuple[date, date] | None = None, pause_seconds: float = 0.0,
-                archive_only: bool = False, scan_interval_minutes: int = 0) -> dict:
+                archive_only: bool = False, scan_interval_minutes: int = 0, swap: bool = False) -> dict:
     """Scheduled enrich mode: for every recent Garmin activity, add to the officially
     synced Intervals activity what the partner copy lacks. Never uploads, never deletes.
 
@@ -507,8 +507,10 @@ def sync_enrich(settings: Settings, garmin: Any, intervals: Any, store: Store, *
             result = None
             copy = next((c for c in remote if str(c.get("source") or "").upper() == "GARMIN_CONNECT"
                          and str(c.get("external_id") or "") == gid), None)
-            if getattr(settings, "swap", False) and copy is not None and not date_range:
-                swapped = _try_swap(settings, gid, str(copy["id"]), garmin, intervals, store, metrics, apply=apply)
+            # swap mode, and a backfill with --swap: the original into Garmin's copy (in place, so the past too)
+            if copy is not None and (swap or (getattr(settings, "swap", False) and not date_range)):
+                swapped = _try_swap(settings, gid, str(copy["id"]), garmin, intervals, store, metrics, apply=apply,
+                                    method="replace" if swap else None)
                 if swapped:
                     result = {"outcome": "swapped", "intervals_id": swapped}
             if result is None:
@@ -1031,12 +1033,18 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
 
 
 def _try_swap(settings: Any, gid: str, iid: str, garmin: Any, intervals: Any, store: Store, metrics: dict, *,
-              apply: bool) -> str | None:
-    """Swap mode: the original for Garmin's copy. The Intervals id the activity has now when the
-    swap took it (or planned it); None when the copy stays and is completed as usual."""
-    from .swap import swap_activity
+              apply: bool, method: str | None = None) -> str | None:
+    """Swap mode: the original for Garmin's copy – into the same activity (replace) or as a new
+    one of your own (upload). The Intervals id the activity has now when the swap took it (or
+    planned it); None when the copy stays and is completed as usual."""
+    from .swap import replace_activity, swap_activity
+    method = method or getattr(settings, "swap_method", "replace")
     try:
-        result = swap_activity(gid, iid, garmin, intervals, store, apply=apply, window_hours=settings.swap_hours)
+        if method == "replace":
+            result = replace_activity(gid, iid, garmin, intervals, store, apply=apply)
+        else:
+            result = swap_activity(gid, iid, garmin, intervals, store, apply=apply,
+                                   window_hours=settings.swap_hours)
     except GarminBlocked:
         raise
     except InstanceBusy:                     # a swap by hand right now: the next full run looks again
@@ -1055,8 +1063,11 @@ def _try_swap(settings: Any, gid: str, iid: str, garmin: Any, intervals: Any, st
             log.info("Swap: %s stays Garmin's copy: %s", iid, result["reason"])
         return None
     if outcome == "planned":
-        log.info("DRY-RUN would swap %s: Garmin's copy %s for the original (carrying %s)", gid, iid,
-                 result["carry"])
+        if method == "replace":
+            log.info("DRY-RUN would put the original of %s into Garmin's copy %s", gid, iid)
+        else:
+            log.info("DRY-RUN would swap %s: Garmin's copy %s for the original (carrying %s)", gid, iid,
+                     result["carry"])
         return iid
     return result.get("new_id") or iid
 

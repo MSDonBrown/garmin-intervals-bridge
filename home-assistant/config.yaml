@@ -30,6 +30,7 @@ schema:
   mode: list(enrich|upload|backup)
   write_to_intervals: bool
   swap: bool
+  swap_method: list(replace|upload)?
   imready4: bool
   hrvtrend: bool
   intervals_notes: bool

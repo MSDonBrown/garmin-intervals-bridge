@@ -275,8 +275,8 @@ def _extras(p: Prompt, saved: dict[str, str], intervals: Any, gear_config: dict 
     out["charts"] = p.yes("Add charts for the Garmin values to your Intervals Fitness page?", default=True)
     p.say("Garmin sends Intervals a filtered file. The bridge completes it (the default) - or it swaps it for\n"
           "the original right after it arrives: Intervals then holds the complete file, and its 'Reprocess file'\n"
-          "keeps everything. For that it deletes the copy in Intervals (never one with comments; nothing on Garmin\n"
-          "Connect is touched); the new activity gets a new id.")
+          "keeps everything. The original goes into the same activity: its notes, RPE, comments and edited\n"
+          "intervals stay, nothing is deleted, nothing on Garmin Connect is touched.")
     out["swap"] = p.yes("Swap Garmin's copy for the original?",
                         default=saved.get("BRIDGE_SWAP", "").lower() == "true")
     return out

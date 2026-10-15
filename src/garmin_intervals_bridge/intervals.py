@@ -233,6 +233,25 @@ class IntervalsClient:
                 time.sleep(wait)
         return None
 
+    def replace_file(self, activity_id: str, path: Path, *, keep_intervals: bool = True,
+                     keep_custom_fields: bool = True) -> dict | None:
+        """POST /activity/{id}/file: this file instead of the activity's own, reprocessed in place.
+        Name, description, type, gear, tags, RPE … stay, and with the defaults the intervals (edited
+        ones included) and the custom field values too. The activity as it is now; None when Intervals
+        found the file unchanged and did nothing."""
+        with path.open("rb") as f:
+            response = self.session.post(
+                f"{self.root}/activity/{_activity_id(activity_id)}/file",
+                params={"keep_intervals": str(keep_intervals).lower(),
+                        "keep_custom_fields": str(keep_custom_fields).lower()},
+                files={"file": (path.name, f, "application/octet-stream")},
+                timeout=(10, 180),
+            )
+        response.raise_for_status()
+        payload = response.json() if response.content else {}
+        activity = payload.get("activity") if isinstance(payload, dict) else None
+        return activity if isinstance(activity, dict) else None
+
     def upload_fit(self, garmin_id: str, path: Path, **extra: Any) -> dict:
         """An Intervals upload returns 201 if an activity was created, 200 otherwise.
 

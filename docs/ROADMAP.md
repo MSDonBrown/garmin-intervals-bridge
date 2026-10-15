@@ -7,9 +7,10 @@ Where the bridge stands and where it goes. Ideas and reports:
 
 ## There
 
-- **Activities:** Garmin's filtered copy completed from the original FIT (*enrich*), replaced
-  by the original (*swap*), or the originals uploaded with the official import off
-  (*upload*); one activity again after Intervals' *Reprocess file*.
+- **Activities:** Garmin's filtered copy completed from the original FIT (*enrich*), the
+  original put into it (*swap*, in place since Intervals' *replace file*), or the originals
+  uploaded with the official import off (*upload*); one activity again after Intervals'
+  *Reprocess file*.
 - **Wellness:** the values the official integration misses, read once the watch has synced;
   the device's own wellness files and Health Snapshots; backfills of the past.
 - **More:** gear from Garmin onto the activities, ImReady4's training advice and an
@@ -29,8 +30,9 @@ Where the bridge stands and where it goes. Ideas and reports:
 
 Asked for in the [feature request](https://forum.intervals.icu/t/api-upload-a-file-onto-an-existing-activity-and-a-new-activity-webhook-for-api-key-users/132953):
 
-- **Upload a file onto an existing activity** – the original into the activity Garmin's import
-  created: no new id, nothing to delete, swap mode without its catch.
+- ~~Upload a file onto an existing activity~~ – there since October 2026
+  (`POST /activity/{id}/file`), swap mode's default now. Asked: whether the activity's source
+  should then stop saying Garmin's import, keeping the link to the Garmin activity.
 - **Being told about a new activity** (a webhook per API key, or an event stream) instead of
   asking every few minutes.
 

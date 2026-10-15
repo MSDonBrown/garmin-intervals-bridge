@@ -14,9 +14,14 @@ configuration:
   swap:
     name: Swap Garmin's copy for the original
     description: >-
-      Replaces the filtered copy Garmin's import created in Intervals with your original file (deletes that
-      copy in Intervals, never one with comments; nothing on Garmin Connect is touched). "Reprocess file" then
-      keeps everything.
+      Puts your original file in place of the filtered copy Garmin's import created in Intervals. "Reprocess
+      file" then keeps everything; nothing on Garmin Connect is touched.
+  swap_method:
+    name: How to swap
+    description: >-
+      replace (default) – the original goes into the same activity: id, notes, comments and edited intervals
+      stay, nothing is deleted. upload – the original as a new activity of your own; Garmin's copy is deleted
+      (never one with comments or edited intervals).
   imready4:
     name: ImReady4 training advice
     description: Fill the TrainingAdvice wellness field each morning, as ImReady4's script does.

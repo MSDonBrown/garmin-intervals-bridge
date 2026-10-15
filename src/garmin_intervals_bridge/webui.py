@@ -270,7 +270,8 @@ class UI:
             rows.append(("Mode", esc({"enrich": "complete Garmin's copies in Intervals",
                                       "upload": "upload the originals to Intervals",
                                       "backup": "back up Garmin to this computer (no Intervals)"}[settings.mode]
-                                     + (" + swap" if settings.swap and settings.mode == "enrich" else ""))))
+                                     + (f" + swap ({settings.swap_method})"
+                                        if settings.swap and settings.mode == "enrich" else ""))))
             if settings.mode != "backup":
                 rows.append(("New activities", self._polls(session, settings, store, now)))
             rows.append(("Day boundary", esc(settings.timezone.key)))
@@ -401,7 +402,8 @@ class UI:
             rows = [("Time zone", settings.timezone.key), ("ImReady4 advice", settings.imready4),
                     ("HRV trend advice", settings.hrvtrend), ("Update hint", settings.update_check),
                     ("Calendar note when Garmin needs a sign-in", settings.intervals_notes),
-                    ("Swap Garmin's copy for the original", settings.swap),
+                    ("Swap Garmin's copy for the original", f"{settings.swap} ({settings.swap_method})"
+                     if settings.swap else settings.swap),
                     ("New activities", self._schedule(settings)),
                     ("Alerts", ", ".join(alerts.channels(settings)) or "none (BRIDGE_ALERT_EMAIL, BRIDGE_NTFY_URL)")]
             table = "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in rows)
@@ -421,9 +423,15 @@ class UI:
                        settings.update_check)
                  + box("intervals_notes", "A note in my Intervals calendar when Garmin needs a new sign-in",
                        settings.intervals_notes)
-                 + box("swap", "Swap Garmin's filtered copy of each new activity for the original (deletes the copy "
-                               "in Intervals, never one with comments, nothing on Garmin Connect; 'Reprocess file' "
-                               "then keeps everything)", settings.swap)
+                 + box("swap", "Swap Garmin's filtered copy of each new activity for the original ('Reprocess file' "
+                               "then keeps everything; nothing on Garmin Connect is touched)", settings.swap)
+                 + '<label>How <select name="swap_method">'
+                 + "".join(f'<option value="{v}"{" selected" if settings.swap_method == v else ""}>{esc(t)}</option>'
+                           for v, t in (("replace", "into the same activity – id, notes, edited intervals stay, "
+                                                    "nothing deleted (recommended)"),
+                                        ("upload", "as a new activity of your own – Garmin's copy deleted, never "
+                                                   "one with comments or edited intervals")))
+                 + '</select></label>'
                  + '<label>Replace the Intervals API key (leave empty to keep it) <input type="password" '
                    'name="api_key" autocomplete="off"></label>'
                  + self._poll_fields(settings)
@@ -505,6 +513,7 @@ class UI:
                           ("update_check", "BRIDGE_UPDATE_CHECK"), ("intervals_notes", "BRIDGE_INTERVALS_NOTES"),
                           ("swap", "BRIDGE_SWAP")):
             values[name] = "true" if form.get(key) == "1" else "false"
+        values["BRIDGE_SWAP_METHOD"] = "upload" if form.get("swap_method") == "upload" else "replace"
         problem = self._poll_values(settings, form, values)
         if problem:
             return self.settings_page(session, f'<p class="bad">{esc(problem)}; nothing was changed.</p>')

@@ -18,9 +18,10 @@ server for alerts – a push message carries a headline only; an e-mail also the
 (no personal data; `BRIDGE_UPDATE_CHECK=false` turns it off). No analytics, no telemetry,
 no third parties.
 
-**What it deletes:** nothing – except, when you switch swap mode on, Garmin's filtered copy
-of a new activity in Intervals, once your original is in its place (never one with
-comments; nothing on Garmin Connect).
+**What it deletes:** nothing – except, when you switch swap mode on with the `upload`
+method, Garmin's filtered copy of a new activity in Intervals, once your original is in as
+a new activity (never one with comments; nothing on Garmin Connect). Swap's default,
+`replace`, puts the original into the same activity and deletes nothing.
 
 **Removing it:** stop the bridge and delete its folder; revoke its access in
 Intervals.icu (*Settings → Developer Settings*, or the connected app) and, if you like,

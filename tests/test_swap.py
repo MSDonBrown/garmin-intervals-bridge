@@ -8,7 +8,7 @@ from test_fit import build_fit
 from test_sync_enrich import GarminFake, IntervalsFake
 
 from garmin_intervals_bridge.store import Store
-from garmin_intervals_bridge.swap import retry_deletes, swap_activity
+from garmin_intervals_bridge.swap import replace_activity, retry_deletes, swap_activity
 from garmin_intervals_bridge.sync import watch_once
 
 NOW = datetime(2026, 10, 8, 9, 0, tzinfo=timezone.utc)
@@ -73,6 +73,10 @@ class SwapIntervals(IntervalsFake):
         if self.delete_status:
             raise http_error(self.delete_status)
         self.calls.append(f"delete {iid}")
+
+    def replace_file(self, iid, path, keep_intervals=True, keep_custom_fields=True):
+        self.calls.append(("replace", iid, path.name, keep_intervals, keep_custom_fields))
+        return None if getattr(self, "unchanged", False) else {"id": iid}
 
 
 def test_swap_uploads_the_original_carries_the_athletes_values_then_deletes_the_copy(tmp_path):
@@ -154,7 +158,8 @@ def test_watch_swaps_new_imports_when_swap_mode_is_on_and_completes_kept_ones(tm
         def activities(self, start, end, fields=None, limit=None):
             return [{"id": "i42", "source": "GARMIN_CONNECT", "external_id": "42", "start_date": "2026-10-08T08:00:00Z"}]
 
-    settings = SimpleNamespace(data_dir=tmp_path, timezone=ZoneInfo("Europe/Vienna"), swap=True, swap_hours=10_000)
+    settings = SimpleNamespace(data_dir=tmp_path, timezone=ZoneInfo("Europe/Vienna"), swap=True, swap_hours=10_000,
+                               swap_method="upload")
     st, i = Store(tmp_path), Watched()
     m = watch_once(settings, GarminFake(), i, st, apply=True, today=date(2026, 10, 8))
     assert m["swap_swapped"] == 1 and m["enriched"] == 0 and i.updates == []          # no enrich of the copy
@@ -295,3 +300,93 @@ def test_comments_that_cannot_be_read_count_as_comments(monkeypatch):
     import pytest
     with pytest.raises(ValueError):
         client.activity_messages("i42")
+
+
+# ---- replace (the default): the original into the same activity, POST /activity/{id}/file ----
+
+def test_replace_puts_the_original_into_the_same_activity_and_deletes_nothing(tmp_path):
+    st, i = Store(tmp_path), SwapIntervals()
+    i.comments = [{"content": "nice ride"}]                         # no reason to wait any more:
+    i.activity_obj["icu_intervals_edited"] = True                     # the activity, its intervals stay
+    st.record_enrichment("42", "i42", "old-sha", ["AerobicEffect"], ["Stamina"])
+    assert replace_activity("42", "i42", GarminFake(), i, st, apply=False)["outcome"] == "planned"
+    assert i.calls == []                                              # a dry run plans only
+    out = replace_activity("42", "i42", GarminFake(), i, st, apply=True)
+    assert out["outcome"] == "replaced" and out["intervals_id"] == "i42"
+    assert i.calls == [("replace", "i42", "42.fit", True, True)]      # intervals and typed values kept
+    assert not any(str(c).startswith("delete") for c in i.calls) and _uploads(i) == []
+    assert st.partner_path("42").read_bytes() == st.fit_path("42").read_bytes()   # nothing left to add
+    assert st.enrichment("42") is None
+    i.activity = lambda iid: (_ for _ in ()).throw(AssertionError("no request"))
+    again = replace_activity("42", "i42", GarminFake(), i, st, apply=True)
+    assert again["outcome"] == "same" and len(i.calls) == 1           # the next full run: nothing to do, no GET
+    st.close()
+
+
+def test_replace_does_not_trust_the_file_of_an_earlier_activity(tmp_path, monkeypatch):
+    monkeypatch.setattr("garmin_intervals_bridge.swap.extract_original_fit", lambda data: data)
+    st, i = Store(tmp_path), SwapIntervals()
+    st.atomic_save(st.fit_path("42"), b"original")
+    st.atomic_save(st.partner_path("42"), b"original")               # what an earlier, deleted activity held
+    st.record_enrichment("42", "i41", "sha", [], [])
+    i.activity_file = lambda iid: b"filtered"
+    assert replace_activity("42", "i42", GarminFake(), i, st, apply=False)["outcome"] == "planned"
+    assert st.partner_path("42").read_bytes() == b"filtered"
+    st.close()
+
+
+def test_replace_leaves_other_activities_and_says_when_intervals_had_the_file(tmp_path):
+    st, i = Store(tmp_path), SwapIntervals()
+    i.unchanged = True                                                # Intervals: file unchanged
+    assert replace_activity("42", "i42", GarminFake(), i, st, apply=True)["outcome"] == "same"
+    st.close()
+    st, i = Store(tmp_path / "b"), SwapIntervals()
+    i.activity_obj["source"] = "STRAVA"
+    assert "not Garmin's import" in replace_activity("42", "i42", GarminFake(), i, st, apply=True)["reason"]
+    assert i.calls == []
+    st.close()
+
+
+def test_the_watch_replaces_by_default_and_completes_nothing_more(tmp_path):
+    class Watched(SwapIntervals):
+        def activities(self, start, end, fields=None, limit=None):
+            return [{"id": "i42", "source": "GARMIN_CONNECT", "external_id": "42", "start_date": "2026-10-08T08:00:00Z"}]
+
+    settings = SimpleNamespace(data_dir=tmp_path, timezone=ZoneInfo("Europe/Vienna"), swap=True, swap_hours=48)
+    st, i = Store(tmp_path), Watched()
+    m = watch_once(settings, GarminFake(), i, st, apply=True, today=date(2026, 10, 8))
+    assert m["swap_replaced"] == 1 and m["enriched"] == 0 and _uploads(i) == []
+    st.close()
+
+
+def test_a_backfill_with_swap_replaces_the_past_in_place(tmp_path, monkeypatch):
+    from garmin_intervals_bridge import sync
+    done = []
+    monkeypatch.setattr("garmin_intervals_bridge.swap.replace_activity",
+                        lambda gid, iid, *a, **k: done.append((gid, iid)) or {"outcome": "replaced", "intervals_id": iid})
+    garmin = GarminFake()
+    garmin.acts = [{"activityId": 42, "startTimeGMT": "2026-01-08 08:00:00", "duration": 3600}]
+
+    class Remote(SwapIntervals):
+        def activities(self, start, end, fields=None, limit=None):
+            return [{"id": "i42", "source": "GARMIN_CONNECT", "external_id": "42", "start_date": "2026-01-08T08:00:00Z"}]
+    settings = SimpleNamespace(data_dir=tmp_path, timezone=ZoneInfo("Europe/Vienna"), swap=False, swap_hours=48,
+                               swap_method="upload", activity_days=4)
+    st = Store(tmp_path)
+    m = sync.sync_enrich(settings, garmin, Remote(), st, apply=True,
+                         date_range=(date(2026, 1, 1), date(2026, 1, 31)), swap=True)
+    assert done == [("42", "i42")] and m["swap_replaced"] == 1          # in place, whatever the swap setting
+    st.close()
+
+
+def test_the_swap_method_setting(monkeypatch):
+    import pytest
+
+    from garmin_intervals_bridge import config
+    monkeypatch.setenv("INTERVALS_API_KEY", "not-a-real-key")
+    assert config.Settings.from_env().swap_method == "replace"
+    monkeypatch.setenv("BRIDGE_SWAP_METHOD", "Upload")
+    assert config.Settings.from_env().swap_method == "upload"
+    monkeypatch.setenv("BRIDGE_SWAP_METHOD", "delete")
+    with pytest.raises(ValueError, match="BRIDGE_SWAP_METHOD"):
+        config.Settings.from_env()

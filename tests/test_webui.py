@@ -348,3 +348,13 @@ def test_when_to_look_is_set_on_the_settings_page(page, env):
     text = call(page, "GET", "/settings", cookie=cookie)[2]
     assert 'name="poll_minutes" value="1"' in text and 'name="poll_quiet_minutes" value="30"' in text
     assert 'name="poll_hours" value="7-23"' in text and 'name="poll_adaptive" value="1" checked' in text
+
+
+def test_how_to_swap_is_set_on_the_settings_page(page, env):
+    cookie = signed_in(page)
+    text = call(page, "GET", "/settings", cookie=cookie)[2]
+    assert 'name="swap_method"' in text and '<option value="replace" selected>' in text
+    call(page, "POST", "/settings", {"csrf": csrf(text), "timezone": "Europe/Vienna", "swap": "1",
+                                     "swap_method": "upload"}, cookie=cookie)
+    values = config.parse_env_file(env)
+    assert values["BRIDGE_SWAP"] == "true" and values["BRIDGE_SWAP_METHOD"] == "upload"

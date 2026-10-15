@@ -2,7 +2,22 @@
 
 ## 0.11.3 — unreleased
 
+### Added
+
+- **Swap in place** (`BRIDGE_SWAP_METHOD=replace`, the new default): swap mode puts the
+  original into Garmin's copy itself, with Intervals' new *replace file*
+  (`POST /activity/{id}/file`, thanks David). The activity keeps its id and link, its name,
+  description, comments, edited intervals, RPE, gear and tags; nothing is deleted, and
+  Intervals computes every field and stream from the complete file. Intervals still lists it
+  as Garmin's import. Thanks Lukasz_Pludowski for the question about edited intervals.
+- `backfill --scope activities --from DATE --swap` does it for the past (in place, so no
+  time limit), `swap <activity> --method replace|upload` for one activity by hand.
+
 ### Changed
+
+- **Swap mode replaces by default.** The previous way – upload the original as a new
+  activity of your own and delete Garmin's copy – stays as `BRIDGE_SWAP_METHOD=upload` (a
+  choice on the web page's settings and in the Home Assistant app).
 
 - **Charts:** a chart the bridge puts on the Fitness page (*Actions → Charts*, `setup-charts`)
   is now a copy of the same chart in Intervals' chart library, as Intervals' own *Copy* makes

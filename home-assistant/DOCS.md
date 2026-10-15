@@ -40,7 +40,8 @@ advice, the log. Home Assistant signs you in; nothing else can reach the page.
 | --- | --- |
 | Mode | `enrich` (usual), `upload` (Garmin's official activity import switched off), `backup` (no Intervals) |
 | Write to Intervals | off = dry run |
-| Swap Garmin's copy for the original | replaces the filtered copy in Intervals with your original file – "Reprocess file" then keeps everything; deletes that copy in Intervals (never one with comments), nothing on Garmin Connect |
+| Swap Garmin's copy for the original | puts your original file in place of the filtered copy – "Reprocess file" then keeps everything; nothing on Garmin Connect is touched |
+| How to swap | `replace` (default): into the same activity, nothing deleted · `upload`: a new activity of your own, Garmin's copy deleted |
 | ImReady4 / HRV trend advice | the morning training advice into your wellness fields |
 | Poll hours / interval / quiet interval | look for new activities less often, only during the day, or slower at night |
 | Adaptive polling (beta) | learns when your activities usually end and checks often only then – fewer requests for Intervals.icu |

@@ -110,6 +110,16 @@ def within_hours(when: Any, ranges: tuple[tuple[int, int], ...]) -> bool:
 
 MODES = ("enrich", "upload", "backup")
 POLL_MODES = ("fixed", "adaptive")
+SWAP_METHODS = ("replace", "upload")
+
+
+def _swap_method() -> str:
+    """BRIDGE_SWAP_METHOD: replace (default) – the original file into the same activity; upload – the
+    original as a new activity of your own, Garmin's copy deleted."""
+    method = os.getenv("BRIDGE_SWAP_METHOD", "").strip().lower() or "replace"
+    if method not in SWAP_METHODS:
+        raise ValueError(f"BRIDGE_SWAP_METHOD must be one of {', '.join(SWAP_METHODS)}")
+    return method
 
 
 def _mode() -> str:
@@ -147,7 +157,8 @@ OPTIONS = {"intervals_api_key": "INTERVALS_API_KEY", "timezone": "BRIDGE_TIMEZON
            "update_check": "BRIDGE_UPDATE_CHECK", "intervals_notes": "BRIDGE_INTERVALS_NOTES",
            "ui_password": "BRIDGE_UI_PASSWORD", "alert_email": "BRIDGE_ALERT_EMAIL",
            "smtp_password": "BRIDGE_SMTP_PASSWORD", "ntfy_url": "BRIDGE_NTFY_URL", "mode": "BRIDGE_MODE",
-           "swap": "BRIDGE_SWAP", "poll_hours": "BRIDGE_POLL_HOURS", "poll_seconds": "BRIDGE_POLL_SECONDS",
+           "swap": "BRIDGE_SWAP", "swap_method": "BRIDGE_SWAP_METHOD",
+           "poll_hours": "BRIDGE_POLL_HOURS", "poll_seconds": "BRIDGE_POLL_SECONDS",
            "backup_hours": "BRIDGE_BACKUP_HOURS", "poll_quiet_seconds": "BRIDGE_POLL_QUIET_SECONDS",
            "poll_mode": "BRIDGE_POLL_MODE"}
 
@@ -251,6 +262,7 @@ class Settings:
     ntfy_url: str | None = field(default=None, repr=False)        # the topic is the secret
     ntfy_token: str | None = field(default=None, repr=False)
     swap: bool = False
+    swap_method: str = "replace"
     swap_hours: int = 48
     poll_seconds: int | None = None
     poll_hours: tuple = ()
@@ -316,6 +328,7 @@ class Settings:
             mode=_mode(),
             backup_hours=_positive_int("BRIDGE_BACKUP_HOURS", 12, 168),
             swap=_flag("BRIDGE_SWAP"),
+            swap_method=_swap_method(),
             swap_hours=_positive_int("BRIDGE_SWAP_HOURS", 48, 24 * 30),
         )
 

@@ -1,15 +1,18 @@
 """Swap mode (BRIDGE_SWAP=true, off by default): Garmin's filtered copy for the original.
 
 The official import stays on and is the trigger: with the next poll after a Garmin activity
-arriving in Intervals, the bridge uploads the device's original file as your own and
-then deletes the filtered copy Garmin's import created in Intervals (Garmin Connect is
-only ever read, never changed). Intervals then holds the complete file – it
-computes every custom field and stream itself, "Reprocess file" keeps them, and it is
-your upload, not Garmin-sourced data. Nothing to poll at Garmin: one original download
-per new activity, as in enrich mode; with the bridge down the copy simply stays (and is
-completed or swapped later).
+arriving in Intervals, the bridge puts the device's original file in its place (Garmin Connect
+is only ever read, never changed). Intervals then holds the complete file – it computes every
+custom field and stream itself, and "Reprocess file" keeps them. Nothing to poll at Garmin: one
+original download per new activity, as in enrich mode.
 
-This is the one place the bridge deletes anything, so it is careful:
+Two ways (BRIDGE_SWAP_METHOD):
+  - replace (default): Intervals' POST /activity/{id}/file puts the original into the same
+    activity – its id, name, notes, RPE, gear, tags, comments, the paired workout, its
+    intervals (edited ones too) and the values typed into custom fields stay; nothing is
+    deleted. It stays Garmin's import (source GARMIN_CONNECT) with the complete file.
+  - upload: the original goes up as a new activity of your own (source UPLOAD), and the
+    filtered copy is deleted. The one place the bridge deletes anything, so it is careful:
   - only a copy of the official Garmin import (source GARMIN_CONNECT, its Garmin id),
     within BRIDGE_SWAP_HOURS (default 48) of its import – `swap <id>` by hand has no limit
   - never with comments on it (asked again right before every delete, retries included),
@@ -124,6 +127,42 @@ def why_not(copy: dict, gid: str, intervals: Any, store: Any, *, window_hours: f
     if intervals.activity_messages(str(copy["id"])):
         return "it has comments"
     return None
+
+
+def replace_activity(gid: str, iid: str, garmin: Any, intervals: Any, store: Any, *, apply: bool) -> dict:
+    """The original into Garmin's copy itself (POST /activity/{id}/file). Outcomes: kept (with
+    the reason), same (nothing filtered, or Intervals found the file unchanged), planned, replaced."""
+    path, partner = store.fit_path(gid), store.partner_path(gid)
+    previous = store.enrichment(gid)
+    if previous and previous["intervals_id"] != iid and partner.is_file():
+        partner.unlink()                       # another Intervals activity's file (re-imported): stale
+    if path.is_file() and partner.is_file() and sha256(path.read_bytes()) == sha256(partner.read_bytes()):
+        # the copy stays Garmin's import after a replace: every later scan ends here, without a request
+        return {"outcome": "same", "intervals_id": iid, "reason": "Intervals has the original already"}
+    copy = intervals.activity(iid)
+    if str(copy.get("source") or "").upper() != "GARMIN_CONNECT":
+        return {"outcome": "kept", "intervals_id": iid, "reason": f"not Garmin's import (source "
+                f"{copy.get('source') or 'unknown'})"}
+    if garmin_id_from(copy.get("external_id")) != gid:
+        return {"outcome": "kept", "intervals_id": iid, "reason": "its Garmin id does not match"}
+    if not path.is_file():
+        store.atomic_save(path, garmin.original_fit(gid))
+    if not partner.is_file():
+        store.atomic_save(partner, extract_original_fit(intervals.activity_file(iid)))
+    original = path.read_bytes()
+    if sha256(original) == sha256(partner.read_bytes()):
+        return {"outcome": "same", "intervals_id": iid, "reason": "Intervals has the original already"}
+    plan = {"outcome": "planned", "intervals_id": iid, "garmin_id": gid, "method": "replace"}
+    if not apply:
+        return plan
+    with single_instance(store.base, ("swap",)):
+        done = intervals.replace_file(iid, path)              # intervals and typed values stay
+        store.atomic_save(partner, original)                   # what Intervals holds now: nothing left to add
+        store.drop_enrichment(gid)                             # what the bridge wrote is the file's own now
+    if done is None:
+        return {**plan, "outcome": "same", "reason": "Intervals found the file unchanged"}
+    log.info("Replaced %s: Garmin's copy %s now holds the original (same activity)", gid, iid)
+    return {**plan, "outcome": "replaced"}
 
 
 def swap_activity(gid: str, iid: str, garmin: Any, intervals: Any, store: Any, *, apply: bool,

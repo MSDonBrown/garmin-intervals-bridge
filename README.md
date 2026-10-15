@@ -21,7 +21,7 @@
 > **Why:** since late September 2026 Garmin strips its own metrics from the FIT files it
 > hands to partners. The bridge fetches the original from Garmin Connect, with your own
 > login, and completes the activity the official sync created — or, in
-> [swap mode](https://github.com/futureweb/garmin-intervals-bridge#modes), replaces it with the original file.
+> [swap mode](https://github.com/futureweb/garmin-intervals-bridge#modes), puts the original file into it.
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/futureweb/garmin-intervals-bridge/main/docs/images/activity-fields.png" alt="Activity fields filled from the original FIT: training effect, VO2max, performance condition, recovery time, stamina, sweat loss" width="900"><br>
@@ -165,7 +165,7 @@ run is exactly what `--apply` would send.
 | `autostart [--status \| --remove \| --dry-run]` | Run `run --apply` in the background at every login (Windows Task Scheduler, macOS LaunchAgent, Linux systemd user service); again = restart. |
 | `ui [--port 8765] [--no-browser]` | The bridge's web page in your browser: status in plain words, Garmin sign-in with MFA, settings, gear and chart actions, the log. See [The web page](#the-web-page). |
 | `backup [--from DATE [--to DATE]] [--scope …]` | Back up Garmin into the data folder, no Intervals needed: without `--from` what backup mode does every `BRIDGE_BACKUP_HOURS`, with `--from` the past. Runs next to a running bridge. |
-| `swap <id or link> [--apply]` | Replace Garmin's filtered copy of one activity by its original (see [Modes](#modes), *swap*). |
+| `swap <id or link> [--method replace\|upload] [--apply]` | The original into Garmin's filtered copy of one activity, also an older one (see [Modes](#modes), *swap*). |
 | `notify-test` | Send a test e-mail / push message to the alert channels that are set up. |
 | `login` | Interactive Garmin sign-in (email, password, MFA). Only session tokens are stored. |
 | `probe [--activity-id]` | Download and archive one original FIT. |
@@ -174,7 +174,7 @@ run is exactly what `--apply` would send.
 | `enrich <id or link> [--apply]` | One activity again, compared with what Intervals holds now – after Intervals' *Reprocess file*, or a new custom field or stream. Works next to a running bridge; `--activity-id <garmin id>` instead names the Garmin side. |
 | `watch [--apply]` | Poll Intervals once (~450 bytes); enrich activities seen for the first time. |
 | `sync [--scope all\|activities\|wellness] [--mode enrich\|upload] [--apply]` | Scheduled run over the last days. |
-| `backfill --scope wellness\|activities --from DATE [--to DATE] [--apply]` | Paced, resumable run over the past. |
+| `backfill --scope wellness\|activities --from DATE [--to DATE] [--apply]` | Paced, resumable run over the past; with `--swap` the originals go into Garmin's copies (in place). |
 | `setup-fields [--apply]` | Create the private custom wellness fields the mapping uses. |
 | `setup-charts [--apply]` | Create (and later complete) private fitness charts for the synced values. |
 | `gear [--prefer intervals\|evidence\|garmin] [--map G=I] [--create] [--apply]` | Put Garmin's gear (bikes, shoes, skis …) on the Intervals activities, from the archive; see [Gear](#gear). |
@@ -209,21 +209,29 @@ later, about 60 requests a day. `backup --from DATE` fills in the past. See
 
 **swap** (`BRIDGE_SWAP=true` on top of enrich, off by default). The official import
 stays on and is the trigger: with the next poll after Garmin's filtered copy arrives, the
-bridge uploads the device's original as your own file, carries over what you may have
-set already (name, description, the paired workout, type, RPE, feel, tags, gear,
-commute/race, ignore settings), then **deletes the copy Garmin's import created in
-Intervals** – nothing on Garmin Connect is touched (the bridge only ever reads from
-Garmin). Intervals then holds
-the complete file: every custom field and stream is computed by Intervals itself,
-*Reprocess file* keeps them, no `icu_intervals_edited` flag, and it is your upload, not
-Garmin-sourced data. No polling of Garmin (one original download per new activity),
-and with the bridge down the copy simply stays and is completed or swapped later.
-This is the only place the bridge deletes anything, so it is careful: only Garmin's
-import, only within `BRIDGE_SWAP_HOURS` (48) of its import, never with comments or
-hand-edited intervals on it, not when Garmin sent the unfiltered file anyway; upload
-first, delete last – a failure leaves a duplicate to see, never a loss; an unknown
-upload outcome stays *pending* and deletes nothing. The new activity has a new id, so
-links to the copy end. `swap <id or link> [--apply]` does it for one activity by hand,
+bridge puts the device's original into Intervals instead of the filtered file. Intervals
+then holds the complete file: every custom field and stream is computed by Intervals
+itself, and *Reprocess file* keeps them. No polling of Garmin (one original download per
+new activity), and with the bridge down the copy simply stays and is completed or
+swapped later. Nothing on Garmin Connect is touched (the bridge only ever reads from
+Garmin). Two methods, `BRIDGE_SWAP_METHOD`:
+
+- `replace` (the default): the original goes into **the same activity** (Intervals'
+  *replace file*, `POST /activity/{id}/file`). Same id and link; name, description,
+  comments, edited intervals, RPE, gear and tags stay; **nothing is deleted**. Intervals
+  still shows the activity as Garmin's import (`source: GARMIN_CONNECT`). Works for the
+  past too: `backfill --scope activities --from DATE --swap --apply`.
+- `upload`: the original as **a new activity of your own** (your upload, not
+  Garmin-sourced data), carrying over what you may have set already (name, description,
+  the paired workout, type, RPE, feel, tags, gear, commute/race, ignore settings), then
+  **deletes the copy Garmin's import created in Intervals**. This is the only place the
+  bridge deletes anything, so it is careful: only Garmin's import, only within
+  `BRIDGE_SWAP_HOURS` (48) of its import, never with comments or hand-edited intervals
+  on it, not when Garmin sent the unfiltered file anyway; upload first, delete last – a
+  failure leaves a duplicate to see, never a loss; an unknown upload outcome stays
+  *pending* and deletes nothing. The new activity has a new id, so links to the copy end.
+
+`swap <id or link> [--method replace|upload] [--apply]` does it for one activity by hand,
 also an older one.
 
 ## Wellness
@@ -583,8 +591,9 @@ win. Relative paths in a settings file count from its folder.
 | `BRIDGE_POLL_HOURS` | always | Look only in these hours, e.g. `10-18` or `6-9,16-22` (`22-6` runs over midnight). Outside them not at all – or every `BRIDGE_POLL_QUIET_SECONDS`; the half-hourly full runs go on, so an activity still arrives (within about two hours) and so does last night's wellness |
 | `BRIDGE_POLL_QUIET_SECONDS` | | Outside `BRIDGE_POLL_HOURS` look this often instead of not at all, and at unusual times in the adaptive mode (there `1800` by default); at the full pace again for an hour after a new activity |
 | `BRIDGE_POLL_MODE` | `fixed` | `adaptive` (beta): learn when your activities usually end, look at the full pace only then |
-| `BRIDGE_SWAP` | `false` | `true`: swap Garmin's filtered copy of each new activity for its original (upload, then delete the copy; see [Modes](#modes)) |
-| `BRIDGE_SWAP_HOURS` | `48` | Only copies imported this recently are swapped automatically |
+| `BRIDGE_SWAP` | `false` | `true`: the original of each new activity instead of Garmin's filtered copy (see [Modes](#modes)) |
+| `BRIDGE_SWAP_METHOD` | `replace` | `replace`: the original into the same activity, nothing deleted; `upload`: a new activity of your own, Garmin's copy deleted |
+| `BRIDGE_SWAP_HOURS` | `48` | `upload` only: only copies imported this recently are swapped automatically |
 | `BRIDGE_OPTIONS_FILE` | `/data/options.json` | A Home Assistant app's form, read when there is no settings file (its keys: `home-assistant/config.yaml`) |
 | `BRIDGE_INTERVALS_NOTES` | `true` | When Garmin's session ends and a new `login` is needed, a bridge running with `--apply` puts one note in your Intervals calendar (once per episode, never deleted by the bridge); `false` turns it off |
 
@@ -635,7 +644,7 @@ Read [SECURITY.md](SECURITY.md) and [PRIVACY.md](PRIVACY.md). In short: no passw
 tokens and the API key readable by the service user only, the data
 directory is personal (routes, health data) and must never be committed or
 shared, dry run by default, no deletions – except Garmin's filtered copy in Intervals when you
-switch swap mode on. The bridge talks to Garmin Connect, Intervals.icu, once a day pypi.org for
+switch swap mode on with the `upload` method. The bridge talks to Garmin Connect, Intervals.icu, once a day pypi.org for
 the update hint, and the mail or ntfy server you set up for alerts – nothing else.
 
 ## Legal note

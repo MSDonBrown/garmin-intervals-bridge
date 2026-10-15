@@ -83,11 +83,15 @@ def build_parser() -> argparse.ArgumentParser:
                                            "Intervals' 'Reprocess file' (dry run unless --apply; works next to "
                                            "a running bridge)")
     enrich.add_argument("activity", nargs="?", help="The Intervals activity: its id (i12345678) or its link")
-    swap = sub.add_parser("swap", help="Replace Garmin's filtered copy of one activity by its original: upload "
-                                       "the original, carry name, workout, RPE ... over, then delete the copy "
-                                       "(dry run unless --apply; BRIDGE_SWAP=true does it for every new one)")
+    swap = sub.add_parser("swap", help="Garmin's filtered copy of one activity for its original: into the same "
+                                       "activity (replace, default) or as a new one of your own with the copy "
+                                       "deleted (upload) – dry run unless --apply; BRIDGE_SWAP=true does it for "
+                                       "every new one")
     swap.add_argument("activity", help="The Intervals activity: its id (i12345678) or its link")
-    swap.add_argument("--apply", action="store_true", help="Actually upload and delete")
+    swap.add_argument("--method", choices=["replace", "upload"],
+                      help="replace = the original into the same activity (default: BRIDGE_SWAP_METHOD); upload = "
+                           "a new activity of your own, Garmin's copy deleted")
+    swap.add_argument("--apply", action="store_true", help="Actually do it")
     enrich.add_argument("--activity-id", help="Garmin Connect activity ID")
     enrich.add_argument("--intervals-id", help="Same as ACTIVITY")
     enrich.add_argument("--apply", action="store_true", help="Actually PUT fields and streams")
@@ -162,6 +166,9 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Activities: fluid (ml) and food (kcal) logged in Garmin into the activity fields "
                                "GarminFluidIntake / GarminCaloriesConsumed, from the archived summaries; no Garmin "
                                "request")
+    backfill.add_argument("--swap", action="store_true",
+                          help="Activities: put each original into Garmin's copy in Intervals (in place: id, notes, "
+                               "edited intervals, typed values stay; nothing deleted) instead of only completing it")
     backfill.add_argument("--archive-only", action="store_true",
                           help="Activities: download the original FIT files that are not on disk yet and "
                                "leave Intervals alone (a local mirror of every recording)")
@@ -730,12 +737,15 @@ def main(argv: list[str] | None = None) -> int:
                     print(json.dumps(plan, indent=2, default=str))
                     return 0
                 if args.cmd == "swap":
-                    from .swap import swap_activity
+                    from .swap import replace_activity, swap_activity
                     intervals = IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
                     gid, iid = resolve_one(intervals, args.activity)
-                    out = swap_activity(gid, iid, garmin, intervals, store, apply=args.apply, window_hours=None)
+                    if (args.method or settings.swap_method) == "replace":
+                        out = replace_activity(gid, iid, garmin, intervals, store, apply=args.apply)
+                    else:
+                        out = swap_activity(gid, iid, garmin, intervals, store, apply=args.apply, window_hours=None)
                     print(json.dumps(out, indent=2, default=str))
-                    return 0 if out["outcome"] in ("planned", "swapped", "same") else 1
+                    return 0 if out["outcome"] in ("planned", "swapped", "replaced", "same") else 1
                 if args.cmd == "probe":
                     if args.activity_id:
                         gid = args.activity_id
@@ -857,7 +867,7 @@ def main(argv: list[str] | None = None) -> int:
                                  start, end, args.pause, " (archive only)" if args.archive_only else "")
                         out = sync_enrich(settings, garmin, intervals, store, apply=args.apply,
                                           date_range=(start, end), pause_seconds=args.pause,
-                                          archive_only=args.archive_only)
+                                          archive_only=args.archive_only, swap=args.swap)
                     store.record_run("backfill", {"apply": args.apply, "scope": args.scope, "from": str(start),
                                                   "to": str(end), "garmin_requests": garmin.requests, **out})
                     print(json.dumps({"apply": args.apply, "scope": args.scope, "from": str(start), "to": str(end),
