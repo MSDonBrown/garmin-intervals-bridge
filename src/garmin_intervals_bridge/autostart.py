@@ -163,11 +163,71 @@ def _not_here(kind: str, why: str) -> dict:
 Runner = Callable[[list[str]], Any]
 
 
+def elevated_window() -> bool:
+    """Windows: this process runs in a window opened "as administrator" – the elevated half of
+    the split token UAC gives an administrator. Folders it creates belong to the Administrators
+    group (with the bridge's owner-only rights: closed to the background bridge, which runs
+    without admin rights), and a task it registers only another such window can replace. With
+    UAC off, or as the built-in Administrator, every process runs alike: nothing to mix up."""
+    return _token_elevated()
+
+
+def _token_elevated() -> bool:
+    """The process token's elevation type (Windows only; tests reach it here, the bridge above)."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+        advapi32.OpenProcessToken.restype = wintypes.BOOL
+        advapi32.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+                                                 ctypes.POINTER(wintypes.DWORD)]
+        advapi32.GetTokenInformation.restype = wintypes.BOOL
+        token = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):  # QUERY
+            return False
+        try:
+            kind, size = ctypes.c_int(0), wintypes.DWORD(0)
+            if not advapi32.GetTokenInformation(token, 18, ctypes.byref(kind), ctypes.sizeof(kind),  # ElevationType
+                                                ctypes.byref(size)):
+                return False
+            return kind.value == 2                        # TokenElevationTypeFull: "Run as administrator"
+        finally:
+            kernel32.CloseHandle(token)
+    except Exception:                                     # no answer: never stand in the way
+        return False
+
+
+class ToolError(subprocess.CalledProcessError):
+    """A scheduler command that failed – with what the tool itself said, which a bare exit
+    status hides (schtasks: "Access is denied" for a task an administrator window set up)."""
+
+    def __init__(self, exc: subprocess.CalledProcessError):
+        super().__init__(exc.returncode, exc.cmd, exc.output, exc.stderr)
+
+    def __str__(self) -> str:
+        cmd = [str(c) for c in self.cmd]
+        said = " ".join(f"{self.stderr or ''} {self.output or ''}".split())[:400] or "no message"
+        text = f"{' '.join(cmd[:2])} failed (exit {self.returncode}): {said}"
+        if cmd[:2] == ["schtasks", "/Create"]:
+            text += (f" – a task set up from a window opened as administrator can only be replaced from such a "
+                     f'window: there, schtasks /Delete /TN "{NAME}" /F, then autostart again from a normal one')
+        return text
+
+
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     # Windows tools answer in the console's code page (cp850 on a German system: "ä" is 0x84),
     # not in UTF-8; and an odd byte must never stop the web page
-    return subprocess.run(cmd, capture_output=True, text=True, check=True,
-                          encoding="oem" if os.name == "nt" else None, errors="replace")
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=True,
+                              encoding="oem" if os.name == "nt" else None, errors="replace")
+    except subprocess.CalledProcessError as exc:
+        raise ToolError(exc) from None
 
 
 def _may_fail(cmd: list[str]) -> bool:

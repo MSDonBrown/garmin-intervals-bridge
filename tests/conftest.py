@@ -31,6 +31,14 @@ def _isolated_process():
         handler.close()
 
 
+@pytest.fixture(autouse=True)
+def _normal_window(monkeypatch):
+    """A CI runner may run elevated: the refusal of a Windows administrator window stays out of the
+    other tests (test_admin_window.py checks it and the real token check)."""
+    from garmin_intervals_bridge import autostart
+    monkeypatch.setattr(autostart, "elevated_window", lambda: False)
+
+
 LOCAL = ("127.0.0.1", "::1", "localhost")
 
 

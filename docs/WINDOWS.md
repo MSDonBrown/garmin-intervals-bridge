@@ -12,7 +12,8 @@ then *Install Now*.
 
 ## 2. Install the bridge
 
-Open PowerShell (press the Windows key, type `PowerShell`, Enter) and paste:
+Open PowerShell (press the Windows key, type `PowerShell`, Enter – a normal
+window, not *Run as administrator*: nothing here needs admin rights) and paste:
 
 ```powershell
 py -m pip install garmin-intervals-bridge
@@ -118,6 +119,16 @@ The second line restarts the background bridge with the new version.
   already starts that way.
 - *"Another bridge instance is running"*: the background bridge is running;
   stop it first (see *The past*).
+- *"This window runs as administrator"*, or *PermissionError* / *Access is
+  denied* after something ran in such a window: folders created from an
+  administrator window belong to the Administrators group, and the background
+  bridge (no admin rights) can't write to them; a task registered from one only
+  such a window can replace. Open PowerShell **as administrator** once and run
+  `schtasks /Delete /TN "Garmin Intervals Bridge" /F` and
+  `icacls "$HOME\GarminBridge" /reset /T /C` (your user folder's own permissions
+  again: private to you), then `py -m garmin_intervals_bridge autostart` from a
+  **normal** window. Always as administrator on purpose: `BRIDGE_ALLOW_ADMIN=true`
+  in `.env` (the background bridge still runs without admin rights).
 - **Garmin's values gone from an activity after Intervals' "Reprocess file"**:
   `py -m garmin_intervals_bridge enrich <the activity's id or link> --apply`, or
   the web page (`ui`) → *Actions → One activity again*.

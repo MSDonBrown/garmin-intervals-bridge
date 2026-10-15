@@ -584,6 +584,7 @@ win. Relative paths in a settings file count from its folder.
 | `BRIDGE_IMREADY4_ENABLED` | `false` | `true`: write ImReady4's training advice into `TrainingAdvice` each morning (see [docs/IMREADY4.md](docs/IMREADY4.md)) |
 | `BRIDGE_HRVTREND_ENABLED` | `false` | `true`: write the experimental trend advice into `HRVTrendAdvice` each morning (see [docs/HRV_TREND.md](docs/HRV_TREND.md)) |
 | `BRIDGE_LOG_FILE` | | Also log to this file (5 MB, three old ones kept); `setup` sets `bridge.log` |
+| `BRIDGE_ALLOW_ADMIN` | `false` | Windows: `true` lets the bridge run in a window opened *as administrator* (refused otherwise: folders created there are closed to the background bridge; see [docs/WINDOWS.md](docs/WINDOWS.md)) |
 | `BRIDGE_UPDATE_CHECK` | `true` | Once a day, ask pypi.org for the newest version and log a hint with the update command; `false` turns it off |
 | `BRIDGE_UI_PORT` | | `run` also serves the web page on this port (needs `BRIDGE_UI_PASSWORD`) |
 | `BRIDGE_UI_PASSWORD` | | Password for the web page next to `run`, or for `ui --host` other than 127.0.0.1; 8+ characters |

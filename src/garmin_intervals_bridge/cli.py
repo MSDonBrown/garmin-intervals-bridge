@@ -15,7 +15,7 @@ from . import __version__, alerts, autostart, hrvtrend, imready4, notices, polli
 from .backup import backup_once, backup_range
 from .backup import describe as describe_backup
 from .charts import setup_charts
-from .config import Settings, configured_log_file
+from .config import Settings, _flag, configured_log_file, load_env_file
 from .enrich import enrich_activity, exact_match, gap_report, intervals_id_from, match_activity, resolve_one
 from .fit import compare_fit, extract_original_fit, sha256
 from .garmin import DAY_ENDPOINTS, GarminBlocked, GarminLoginNeeded, GarminSource, parse_endpoints
@@ -523,6 +523,28 @@ def _autostart(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+ADMIN_WINDOW = ("This window runs as administrator. Folders the bridge creates from here would belong to the "
+                "Administrators group, and the background bridge – which runs without admin rights – could not "
+                "write to them later; a task registered from here only such a window could replace. Please use a "
+                "normal PowerShell window: nothing in the bridge needs admin rights. (To run it as administrator "
+                "anyway: BRIDGE_ALLOW_ADMIN=true in the settings file.)")
+
+
+def _admin_window_ok(args: argparse.Namespace, log: logging.Logger) -> bool:
+    """Windows: not from a window opened "as administrator" – except to clear up after one."""
+    if not autostart.elevated_window():
+        return True
+    if args.cmd == "autostart" and (args.remove or args.status or args.dry_run):
+        return True                                   # what clears up a task such a window set up
+    load_env_file()                                   # BRIDGE_ALLOW_ADMIN may be in the settings file
+    if _flag("BRIDGE_ALLOW_ADMIN"):
+        log.warning("Running as administrator (BRIDGE_ALLOW_ADMIN): the background bridge runs without admin "
+                    "rights and may not be able to write to folders created from here")
+        return True
+    log.error(ADMIN_WINDOW)
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     # pythonw.exe (the Windows autostart) has no console: no stdout or stderr to write to
     for name in ("stdout", "stderr"):
@@ -542,6 +564,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("enrich needs the Intervals activity: enrich i12345678 (or its link)")
         if args.env_file:
             os.environ["BRIDGE_ENV_FILE"] = str(args.env_file)
+        if not _admin_window_ok(args, log):
+            return 1
         if args.cmd == "setup":
             return wizard.run()
         log_file = configured_log_file()

@@ -727,9 +727,15 @@ class UI:
         if settings.env_file is None or autostart.platform() == "container":
             raise Reply(403, "Nothing to restart from here")
         # after this answer has gone out: the bridge that serves this page may be the one restarted
-        threading.Timer(1.0, self.restart, args=(settings.env_file,)).start()
+        threading.Timer(1.0, self._restart, args=(settings.env_file,)).start()
         return self.page(session, "Restart", '<section><p class="ok">The background bridge restarts with the '
                          'current settings.</p><p><a href="/">Back to the status</a></p></section>')
+
+    def _restart(self, env_file: Path) -> None:
+        try:
+            self.restart(env_file)
+        except Exception as exc:                  # after the answer went out: the log is where it shows
+            log.error("Restart of the background bridge failed: %s: %s", type(exc).__name__, exc)
 
     # -- actions --
 

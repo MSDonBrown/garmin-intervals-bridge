@@ -10,6 +10,22 @@
   are completed too (before, only the last 3–4 days were). A run cut short by a Garmin limit
   or a shutdown is carried on by the next one.
 
+### Fixed
+
+- **Windows, a window opened "as administrator":** folders the bridge created from it belonged
+  to the Administrators group, with the bridge's owner-only rights – closed to the background
+  bridge, which runs without admin rights (*PermissionError* when archiving or writing the
+  intake), and a task registered from it only such a window could replace (`schtasks` ended
+  with "exit status 1"). The bridge now refuses to run in such a window and says why;
+  `autostart --remove` and `--status` still work there, to clear up. On purpose:
+  `BRIDGE_ALLOW_ADMIN=true`. With UAC off, where every window runs alike, nothing changes.
+  The Windows guide says how to repair a folder and task from before (thanks Okocha in the
+  forum).
+- **A scheduler command that fails** (`schtasks`, `launchctl`, `systemctl`) shows what the tool
+  said – "Access is denied", say – not only its exit status; for `schtasks /Create` with how to
+  clear up a task an administrator window set up. A restart from the web page that fails is
+  in the log now.
+
 ### Changed
 
 - **Home Assistant app:** the web page's *Log* said "No log file". The app now keeps the
