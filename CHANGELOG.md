@@ -29,6 +29,10 @@
   and a second `ui` whose port is still taken by the old page says so instead of
   "Address already in use" (on Windows two pages could even share the port). Thanks
   Lukasz_Pludowski.
+- **A Garmin sign-in that fails** says what it was about. Only wrong credentials get "check e-mail
+  and password"; when Garmin did not let the sign-in through ("all login strategies
+  exhausted"), `setup` and the web page say so, with the library's reason, and that the
+  password is not the problem. Before, both read like a typing error.
 - **A scheduler command that fails** (`schtasks`, `launchctl`, `systemctl`) shows what the tool
   said – "Access is denied", say – not only its exit status; for `schtasks /Create` with how to
   clear up a task an administrator window set up. A restart from the web page that fails is

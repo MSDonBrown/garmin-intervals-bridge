@@ -29,7 +29,7 @@ from .backup import backup_once
 from .backup import describe as describe_backup
 from .charts import setup_charts
 from .config import Settings, bridge_home, env_file, env_line_key, parse_env_file
-from .garmin import GarminBlocked, GarminLoginNeeded, GarminSource
+from .garmin import GarminBlocked, GarminLoginNeeded, GarminSource, sign_in_problem
 from .gear import RECENT_DAYS
 from .gear import apply_plan as apply_gear_plan
 from .gear import build_plan as build_gear_plan
@@ -247,7 +247,7 @@ def _garmin(p: Prompt, settings: Settings, source: Callable[..., Any]) -> Any | 
         p.say(f"Garmin refused the sign-in for now ({exc}). If it says 429: wait an hour, then run setup again.")
         return None
     except Exception as exc:
-        p.say(f"Garmin sign-in failed ({type(exc).__name__}): check e-mail and password, then run setup again.")
+        p.say(f"{sign_in_problem(exc)} Run setup again then; your answers so far are saved.")
         return None
     p.say("Garmin Connect: signed in.")
     return garmin

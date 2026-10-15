@@ -48,6 +48,18 @@ def _chain(exc: BaseException):
         exc = exc.__cause__ or exc.__context__
 
 
+def sign_in_problem(exc: BaseException) -> str:
+    """What a failed sign-in was about, for the person at the screen. Wrong e-mail or password is
+    one thing; the library's "all login strategies exhausted" (a connection error) is another –
+    Garmin did not let it through – and its reason is what helps (the library already redacts
+    URL values; query strings are cut here too)."""
+    if any("Authentication" in type(e).__name__ for e in _chain(exc)):
+        return "Garmin did not accept this e-mail and password."
+    reason = re.sub(r"\?\S*", "?…", " ".join(str(exc).split()))[:300]
+    return (f"Garmin did not let the sign-in through ({type(exc).__name__}{': ' + reason if reason else ''}). "
+            "This is not about your password: wait an hour, then try again.")
+
+
 def _is_blocked(exc: BaseException) -> bool:
     """Rate-limited or session rejected: the whole run must stop."""
     return any("TooManyRequests" in type(e).__name__ or "Authentication" in type(e).__name__

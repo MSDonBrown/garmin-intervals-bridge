@@ -443,3 +443,60 @@ def test_ui_says_when_its_port_is_taken(capsys):
     finally:
         taken.close()
     assert "is in use – most likely by a page of the bridge that is still open" in capsys.readouterr().err
+
+
+# ---- a sign-in Garmin did not let through is not a wrong password ----
+
+class GarminConnectConnectionError(Exception):
+    pass
+
+
+class GarminConnectAuthenticationError(Exception):
+    pass
+
+
+def test_a_sign_in_garmin_did_not_let_through_says_why_not_password(page):
+    from garmin_intervals_bridge.garmin import sign_in_problem
+    exhausted = GarminConnectConnectionError("All login strategies exhausted: portal+requests failed: 403 for "
+                                             "https://sso.garmin.com/sso/signin?ticket=ST-secret")
+    text = sign_in_problem(exhausted)
+    assert "not about your password" in text and "All login strategies exhausted" in text
+    assert "ST-secret" not in text and "wait an hour" in text
+    assert sign_in_problem(GarminConnectAuthenticationError("401")) == "Garmin did not accept this e-mail and password."
+
+    class Refused(FakeGarmin):
+        def start_login(self, email, password):
+            raise exhausted
+    page.garmin_source = Refused
+    cookie = signed_in(page)
+    token = csrf(call(page, "GET", "/garmin", cookie=cookie)[2])
+    status, _, text = call(page, "POST", "/garmin", {"csrf": token, "email": "ann@example.com",
+                                                     "password": GARMIN_PASSWORD}, cookie=cookie)
+    for _ in range(100):                          # a quick answer comes at once, a slow one on the waiting page
+        if status != 303 and "Signing in" not in text:
+            break
+        status, _, text = call(page, "GET", "/garmin", cookie=cookie)
+        time.sleep(0.05)
+    assert "Garmin did not let the sign-in through" in text and "not about your password" in text
+    assert "ST-secret" not in text and GARMIN_PASSWORD not in text
+
+
+def test_setup_says_what_the_garmin_sign_in_was_about():
+    from types import SimpleNamespace
+
+    from garmin_intervals_bridge import wizard
+
+    class Source:
+        def __init__(self, token_dir, delay):
+            pass
+
+        def login(self, interactive):
+            if not interactive:
+                raise wizard.GarminLoginNeeded("no session")
+            raise GarminConnectConnectionError("All login strategies exhausted: mobile+cffi failed")
+    said = []
+    p = SimpleNamespace(say=said.append)
+    settings = SimpleNamespace(token_dir="t", garmin_request_delay=0.5)
+    assert wizard._garmin(p, settings, Source) is None
+    assert "not about your password" in said[-1] and "mobile+cffi failed" in said[-1]
+    assert "check e-mail and password" not in said[-1]

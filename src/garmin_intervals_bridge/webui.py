@@ -45,7 +45,7 @@ from . import __version__, alerts, autostart, hrvtrend, imready4, notices, polli
 from .charts import setup_charts
 from .config import Settings, poll_hours
 from .enrich import enrich_activity, resolve_one
-from .garmin import GarminBlocked, GarminSource
+from .garmin import GarminBlocked, GarminSource, sign_in_problem
 from .gear import apply_plan as apply_gear_plan
 from .gear import build_plan as build_gear_plan
 from .gear import load_config as load_gear_config
@@ -544,10 +544,7 @@ class UI:
             return self.garmin_page(session, '<p class="bad">Garmin limits sign-ins right now (429). Wait an hour, '
                                              'then try again.</p>')
         if exc is not None:
-            name = type(exc).__name__
-            text = ("Garmin did not accept this e-mail and password." if "Authentication" in name
-                    else f"The sign-in failed ({esc(name)}).")
-            return self.garmin_page(session, f'<p class="bad">{text}</p>')
+            return self.garmin_page(session, f'<p class="bad">{esc(sign_in_problem(exc))}</p>')
         garmin, outcome = job.outcome
         if outcome == "mfa":
             session.garmin, session.garmin_since = garmin, time.time()
