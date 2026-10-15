@@ -127,7 +127,7 @@ def _run_app(tmp_path, data, share):
     import subprocess
     stub = tmp_path / "bin"
     stub.mkdir(exist_ok=True)
-    (stub / "garmin-intervals-bridge").write_text('#!/bin/sh\necho "started: $*"\n')
+    (stub / "garmin-intervals-bridge").write_text('#!/bin/sh\necho "started: $*"\necho "log: $BRIDGE_LOG_FILE"\n')
     (stub / "garmin-intervals-bridge").chmod(0o755)
     environment = {"PATH": f"{stub}:{os.environ['PATH']}", "HA_DATA": str(data), "HA_SHARE": str(share)}
     return subprocess.run(["sh", str(APP / "run.sh")], env=environment, capture_output=True, text=True,
@@ -154,6 +154,14 @@ def test_the_app_takes_a_data_folder_over_even_after_an_empty_first_start(tmp_pa
     out = _run_app(tmp_path, data, share)
     assert "Taking over" not in out and "started: run --apply" in out and (data / "bridge.db").read_text() == \
         "its own by now"
+
+
+def test_the_app_logs_to_a_file_in_its_data_folder(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "options.json").write_text("{}")
+    out = _run_app(tmp_path, data, tmp_path / "share")
+    assert f"log: {data}/bridge.log\n" in out                 # the web page's Log, with date and time
 
 
 def test_the_app_never_takes_over_when_it_has_a_session(tmp_path):

@@ -21,5 +21,6 @@ if [ ! -e "$DATA/.taken-over" ] && [ -e "$SHARE/garmin-bridge/bridge.db" ] \
 fi
 export BRIDGE_DATA_DIR="$DATA" GARMIN_TOKEN_DIR="$DATA/tokens" BRIDGE_OPTIONS_FILE="$DATA/options.json"
 export BRIDGE_UI_PORT=8099 BRIDGE_UI_HOST=0.0.0.0 BRIDGE_UI_INGRESS=1
+export BRIDGE_LOG_FILE="$DATA/bridge.log"      # the web page's Log, with date and time (5 MB x 3)
 APPLY=$(python3 -c 'import json, sys; print("--apply" if json.load(open(sys.argv[1])).get("write_to_intervals") else "")' "$DATA/options.json")
 exec garmin-intervals-bridge run $APPLY

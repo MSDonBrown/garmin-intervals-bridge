@@ -33,6 +33,7 @@ data it already has – and carries on without a new Garmin sign-in.
 In the sidebar: what the bridge did, *Check now* for new activities, the Garmin sign-in, gear and chart plans with a button
 to carry them out, one activity again after Intervals' *Reprocess file*, today's training
 advice, the log. Home Assistant signs you in; nothing else can reach the page.
+The page's *Log* shows the bridge's log with date and time.
 
 ## Options
 
