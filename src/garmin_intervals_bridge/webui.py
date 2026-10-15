@@ -111,9 +111,9 @@ tr:first-child>td,tr:first-child>th{border-top:0;padding-top:0}tr:last-child>td,
 th{font-weight:600;white-space:nowrap;width:1%;padding-right:24px}
 section>table th{color:var(--muted);font-weight:500}
 label{display:block;margin:0 0 14px;font-weight:500}
-label>input:not([type=checkbox]){display:block;width:100%;max-width:440px;margin-top:5px;font:inherit;font-weight:400;
+label>input:not([type=checkbox]),label>select{display:block;width:100%;max-width:440px;margin-top:5px;font:inherit;font-weight:400;
 padding:8px 10px;border:1px solid var(--field);border-radius:6px;background:var(--card);color:var(--fg)}
-label>input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+label>input:focus,label>select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 label:has(>input[type=checkbox]){display:flex;gap:10px;align-items:flex-start;font-weight:400;margin-bottom:10px}
 input[type=checkbox]{flex:none;width:16px;height:16px;margin:3px 0 0;accent-color:var(--accent)}
 form h2{margin:24px -20px 12px;padding:16px 20px 0;border-top:1px solid var(--line)}form h2+p{margin-top:-4px}
@@ -430,8 +430,9 @@ class UI:
                 'replace this session.</p>')
 
     def garmin_get(self, session: Session, query: dict, form: dict) -> str:
-        if session.garmin_job is not None:
-            return self._garmin_result(session)
+        job = session.garmin_job
+        if job is not None:
+            return self._garmin_result(session, job)
         if session.garmin is not None and time.time() - session.garmin_since <= PENDING_SECONDS:
             return self.garmin_page(session, mfa=True)                  # still waiting for the code
         return self.garmin_page(session)
@@ -442,9 +443,9 @@ class UI:
         settings = self.settings()
         garmin = self.garmin_source(settings.token_dir, settings.garmin_request_delay)
         email, password = form.get("email", "").strip(), form.get("password", "")
+        job = self._garmin_start(session, "password", lambda: (garmin, garmin.start_login(email, password)))
         session.garmin = None
-        session.garmin_job = GarminJob("password", lambda: (garmin, garmin.start_login(email, password)))
-        return self._garmin_result(session, wait=True)
+        return self._garmin_result(session, job, wait=True)
 
     def garmin_mfa(self, session: Session, query: dict, form: dict) -> str:
         if session.garmin_job is not None and not session.garmin_job.done.is_set():
@@ -454,13 +455,25 @@ class UI:
             session.garmin = None
             return self.garmin_page(session, '<p class="warn">That took too long; please sign in again.</p>')
         code = form.get("code", "")
-        session.garmin_job = GarminJob("code", lambda: (garmin, garmin.finish_login(code)))
-        return self._garmin_result(session, wait=True)
+        job = self._garmin_start(session, "code", lambda: (garmin, garmin.finish_login(code)))
+        return self._garmin_result(session, job, wait=True)
 
-    def _garmin_result(self, session: Session, wait: bool = False) -> str:
+    def _garmin_start(self, session: Session, step: str, work: Callable[[], Any]) -> GarminJob:
+        with self.lock:                      # two clicks at once: still one sign-in, the other shows it
+            if session.garmin_job is not None and not session.garmin_job.done.is_set():
+                raise Reply(303, "", {"Location": "/garmin"})
+            job = session.garmin_job = GarminJob(step, work)
+        return job
+
+    def _garmin_take(self, session: Session, job: GarminJob) -> None:
+        """This request answers for the job; with two reloads at once the other one shows the page anew."""
+        with self.lock:
+            if session.garmin_job is not job:
+                raise Reply(303, "", {"Location": "/garmin"})
+            session.garmin_job = None
+
+    def _garmin_result(self, session: Session, job: GarminJob, wait: bool = False) -> str:
         """The finished sign-in step's answer, or a page that says Garmin is still being asked."""
-        job = session.garmin_job
-        assert job is not None
         if wait:
             job.done.wait(GARMIN_WAIT)
         if not job.done.is_set():
@@ -468,7 +481,7 @@ class UI:
                 raise Reply(303, "", {"Location": "/garmin"})
             seconds = time.time() - job.started
             if seconds > PENDING_SECONDS:
-                session.garmin_job = None
+                self._garmin_take(session, job)
                 return self.garmin_page(session, '<p class="bad">Garmin has not answered for ten minutes; try again '
                                                  'later.</p>')
             what = "Signing in to Garmin Connect" if job.step == "password" else "Checking the code with Garmin"
@@ -476,7 +489,7 @@ class UI:
                              f'{what}&hellip;</b> {int(seconds)} s so far</p><p class="muted">Garmin often takes '
                              'up to half a minute. This page updates by itself.</p></div></section>',
                              refresh=GARMIN_REFRESH)
-        session.garmin_job = None
+        self._garmin_take(session, job)
         exc = job.error
         if job.step == "code":
             if exc is not None:

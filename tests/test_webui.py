@@ -179,6 +179,21 @@ def test_a_slow_garmin_sign_in_shows_a_page_that_waits_for_it(page, env, monkeyp
     assert 'name="code"' in call(page, "GET", "/garmin", cookie=cookie)[2]   # a reload keeps asking for the code
 
 
+def test_two_requests_at_once_start_one_sign_in_and_take_its_answer_once(page):
+    session = webui.Session()
+    job = page._garmin_start(session, "password", lambda: (None, "ok"))
+    assert job.done.wait(5)
+    page._garmin_take(session, job)                                     # the first reload answers
+    with pytest.raises(webui.Reply) as second:
+        page._garmin_take(session, job)                                 # the other one shows the page anew
+    assert second.value.status == 303 and session.garmin_job is None
+    gate = threading.Event()
+    page._garmin_start(session, "password", lambda: gate.wait(5))
+    with pytest.raises(webui.Reply):
+        page._garmin_start(session, "password", lambda: None)          # a second click while Garmin answers
+    gate.set()
+
+
 def test_settings_are_saved_and_the_key_is_checked_but_never_shown(page, env):
     cookie = signed_in(page)
     text = call(page, "GET", "/settings", cookie=cookie)[2]
