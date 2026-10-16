@@ -29,6 +29,9 @@
   and a second `ui` whose port is still taken by the old page says so instead of
   "Address already in use" (on Windows two pages could even share the port). Thanks
   Lukasz_Pludowski.
+- **`setup` on Windows, pasting the API key:** in Windows Terminal (Windows 11's default) the
+  hint says Ctrl+V; in the classic console a right-click, on a trackpad a two-finger tap
+  (thanks Andy_Drake in the forum).
 - **A Garmin sign-in that fails** says what it was about. Only wrong credentials get "check e-mail
   and password"; when Garmin did not let the sign-in through ("all login strategies
   exhausted"), `setup` and the web page say so, with the library's reason, and that the

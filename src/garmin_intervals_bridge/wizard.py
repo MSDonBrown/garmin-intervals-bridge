@@ -166,6 +166,18 @@ def _athlete_name(athlete: dict) -> str:
     return str(name or athlete.get("id") or "your account")
 
 
+def _paste_hint() -> tuple[str, str] | None:
+    """Windows: how a paste reaches the hidden key prompt in this very window – (how, why). Windows
+    Terminal (Windows 11's default) pastes Ctrl+V itself; the classic console hands it over as ^V,
+    and a trackpad's right-click is a two-finger tap (Andy_Drake in the forum did not find it)."""
+    if os.name != "nt":
+        return None
+    if os.getenv("WT_SESSION"):
+        return "Ctrl+V or a right-click", ""
+    return ("a right-click (on a trackpad: a two-finger tap)",
+            ": in this window Ctrl+V does not reach a hidden prompt")
+
+
 def _intervals_key(p: Prompt, saved: str, client: Callable[[str], Any]) -> tuple[str, Any] | None:
     if saved:
         try:
@@ -178,14 +190,14 @@ def _intervals_key(p: Prompt, saved: str, client: Callable[[str], Any]) -> tuple
         except requests.RequestException as exc:
             p.say(f"Could not reach intervals.icu ({type(exc).__name__}); check the internet connection.")
             return None
+    paste = _paste_hint()
     p.say("Your Intervals.icu API key: intervals.icu -> Settings -> Developer Settings -> API key.\n"
           "Copy it from there; it is not shown while you paste it, and it stays on this computer."
-          + ("\nPaste it with a right-click: in this window Ctrl+V does not reach a hidden prompt." if os.name == "nt"
-             else ""))
+          + (f"\nPaste it with {paste[0]}{paste[1]}." if paste else ""))
     for _ in range(3):
         key = p.secret("API key").strip("\"'").strip()          # quotes copied along are no part of it
         if not key:
-            p.say("Nothing arrived" + (" – paste with a right-click, then Enter." if os.name == "nt" else "."))
+            p.say("Nothing arrived" + (f" – paste with {paste[0]}, then Enter." if paste else "."))
             continue
         try:
             intervals = client(key)
@@ -194,7 +206,7 @@ def _intervals_key(p: Prompt, saved: str, client: Callable[[str], Any]) -> tuple
             status = getattr(exc.response, "status_code", None)
             if status in (401, 403) and len(key) < 16:
                 p.say(f"Intervals refused it – only {len(key)} characters arrived, an API key is longer."
-                      + (" Paste with a right-click, then Enter." if os.name == "nt" else ""))
+                      + (f" Paste with {paste[0]}, then Enter." if paste else ""))
             else:
                 p.say("Intervals refused this key; check that it is complete." if status in (401, 403)
                       else f"Intervals answered with an error ({status}); try again.")

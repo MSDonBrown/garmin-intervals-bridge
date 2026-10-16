@@ -578,7 +578,20 @@ def test_what_a_paste_brings_along_is_no_part_of_the_key(monkeypatch):
     script = Script(answers=[], secrets=["\x16", "\x16\x16", '"good-key"\r\n'])
     script.say = said.append
     monkeypatch.setattr(wizard.os, "name", "nt")
+    monkeypatch.delenv("WT_SESSION", raising=False)                      # the classic console
     key, _ = wizard._intervals_key(script, "", lambda key: WizardIntervals(key))
     assert key == "good-key"
-    assert said.count("Nothing arrived – paste with a right-click, then Enter.") == 2
-    assert any("Paste it with a right-click" in line for line in said)
+    assert said.count("Nothing arrived – paste with a right-click (on a trackpad: a two-finger tap), then "
+                      "Enter.") == 2
+    assert any("Paste it with a right-click (on a trackpad: a two-finger tap): in this window Ctrl+V" in line
+               for line in said)
+
+
+def test_windows_terminal_is_told_ctrl_v_works(monkeypatch):
+    said = []
+    script = Script(answers=[], secrets=["good-key"])
+    script.say = said.append
+    monkeypatch.setattr(wizard.os, "name", "nt")
+    monkeypatch.setenv("WT_SESSION", "a-session")                       # Windows Terminal, Windows 11's default
+    wizard._intervals_key(script, "", lambda key: WizardIntervals(key))
+    assert any("Paste it with Ctrl+V or a right-click." in line for line in said)
