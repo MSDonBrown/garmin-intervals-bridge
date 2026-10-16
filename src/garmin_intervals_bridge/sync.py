@@ -381,11 +381,18 @@ def note_pause(settings: Settings, store: Store, today: date) -> None:
     """A computer switched on once a week, a server down for days, a Garmin sign-in that waited:
     the bridge's last run is older than its usual window. Remember, for activities and wellness,
     the first day the scheduled runs have to read again – the window as it was at the last run,
-    at most CATCH_UP_DAYS back. A new install has no last run: the usual window."""
+    at most CATCH_UP_DAYS back. A new install has no last run: the usual window.
+
+    A pause is a whole day without a run: the night of a bridge that runs on (last run yesterday)
+    only moves the window. Each pause is noted once – the same run asks again after its
+    activities are caught up, before it is recorded itself."""
     last = max(store.last_run("sync") or 0, store.last_run("watch") or 0)
     if not last:
         return
     last_day = datetime.fromtimestamp(last, settings.timezone).date()
+    if (today - last_day).days < 2 or store.get_meta(CATCH_UP_KEY + "from") == f"{last:.0f}":
+        return
+    store.set_meta(CATCH_UP_KEY + "from", f"{last:.0f}")
     for scope, base in (("activities", settings.activity_days), ("wellness", settings.wellness_days)):
         start = max(last_day - timedelta(days=base - 1), today - timedelta(days=CATCH_UP_DAYS - 1))
         if start >= today - timedelta(days=base - 1):

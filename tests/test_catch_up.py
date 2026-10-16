@@ -6,7 +6,7 @@ from test_wellness_schedule import TODAY, ListingGarmin, QuietIntervals, at, fre
 
 from garmin_intervals_bridge.garmin import GarminBlocked
 from garmin_intervals_bridge.store import Store
-from garmin_intervals_bridge.sync import CATCH_UP_KEY, catch_up_days, note_pause, sync_enrich, wellness_check
+from garmin_intervals_bridge.sync import CATCH_UP_KEY, catch_up_days, caught_up, note_pause, sync_enrich, wellness_check
 
 
 def ran(st, when):
@@ -93,4 +93,20 @@ def test_a_scan_cut_short_keeps_the_catch_up_for_the_next_run(tmp_path):
     g = Listing()
     sync_enrich(s, g, QuietIntervals(), st, apply=True, today=TODAY, scan_interval_minutes=120, catch_up=True)
     assert g.window == (TODAY - timedelta(days=7), TODAY)
+    st.close()
+
+
+def test_midnight_is_no_pause_and_a_pause_is_noted_once(tmp_path):
+    st, s = Store(tmp_path), settings(tmp_path, days=3)
+    ran(st, at(23, 50, day=TODAY - timedelta(days=1)))                   # a bridge that runs on, past midnight
+    note_pause(s, st, TODAY)
+    assert not st.get_meta(CATCH_UP_KEY + "activities") and not st.get_meta(CATCH_UP_KEY + "wellness")
+    st.close()
+    st = Store(tmp_path / "b")
+    ran(st, at(23, 50, day=TODAY - timedelta(days=2)))                   # a whole day without a run
+    note_pause(s, st, TODAY)
+    assert catch_up_days(st, "activities", 3, TODAY) == 5
+    caught_up(st, "activities")                                          # the scan of this run went through ...
+    note_pause(s, st, TODAY)                                             # ... and its wellness part asks again
+    assert catch_up_days(st, "activities", 3, TODAY) == 3 and catch_up_days(st, "wellness", 3, TODAY) == 5
     st.close()
