@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.11.4 — unreleased
+## 0.11.4 — 2026-10-17
+
+A computer that is only on now and then catches up; Windows, the web page and setup say
+better what is going on.
 
 ### Added
 
@@ -51,6 +54,7 @@
 
 - **Python 3.14 and 3.15:** the tests run on them too (Linux; 3.15 also on the Mac), and the
   package says so.
+- The release workflows use the current Docker and artifact actions (Dependabot).
 - **Home Assistant app:** the web page's *Log* said "No log file". The app now keeps the
   bridge's rotated log file (5 MB, three old ones kept) as `bridge.log` in its data folder, so
   the page shows the log with date and time. The app's own *Log* tab is unchanged (thanks
