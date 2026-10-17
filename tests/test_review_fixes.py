@@ -105,6 +105,7 @@ def test_watch_skips_the_poll_when_the_lock_is_held(tmp_path, monkeypatch):
     checked, polled = [], []
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: checked.append(1) or {})
     monkeypatch.setattr(cli, "watch_once", lambda *a, **k: polled.append(1) or {})
+    monkeypatch.setattr(cli, "BUSY_WAIT_SECONDS", 0)                  # a backfill waits for a run; not here
     with single_instance(tmp_path, ("activities",)):
         assert main(["watch"]) == 0                        # poll skipped, no error exit, no alert
         assert polled == [] and checked == [1]             # the free wellness scope still does its check
@@ -444,6 +445,57 @@ def test_sync_scope_all_does_the_free_scope_while_a_backfill_holds_the_other(tmp
     with single_instance(tmp_path, ("wellness",)):                      # a wellness backfill is running
         assert main(["sync", "--scope", "all"]) == 0
     assert ran == ["activities"]
+
+
+def test_run_loop_leaves_a_part_a_backfill_works_on_and_goes_on_after(tmp_path, monkeypatch, caplog):
+    # Jeroen_Doesburg in the forum: a backfill next to the background bridge, without stopping it
+    from contextlib import ExitStack
+
+    from garmin_intervals_bridge import cli
+    calls = []
+    monkeypatch.setattr(cli, "sync_enrich", lambda *a, **k: calls.append("sync") or {"seen": 1, "enriched": 0, "planned": 0})
+    monkeypatch.setattr(cli, "sync_wellness", lambda *a, **k: calls.append("wellness") or {"days_checked": 1, "writes": 0})
+    monkeypatch.setattr(cli, "watch_once", lambda *a, **k: calls.append("watch") or {"new": 0, "enriched": 0, "planned": 0})
+    monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: calls.append("check") or {"intervals_checks": 1})
+    _clock(monkeypatch, calls)
+    backfill = ExitStack()
+    backfill.enter_context(single_instance(tmp_path, ("wellness",)))         # a wellness backfill is running
+    fake_sleep = cli.time.sleep
+
+    def sleep(seconds):
+        fake_sleep(seconds)
+        if len([c for c in calls if isinstance(c, tuple)]) == 2:
+            backfill.close()                                                 # ... and done after a while
+    monkeypatch.setattr(cli.time, "sleep", sleep)
+    st = Store(tmp_path)
+    with caplog.at_level("INFO"):
+        assert cli.run_loop(_loop_settings(tmp_path), st, apply=False, poll_seconds=60, sync_minutes=30,
+                            iterations=9) == 0
+    first_sleep = next(i for i, c in enumerate(calls) if isinstance(c, tuple))
+    assert calls[:first_sleep] == ["sync"]                                   # the activities part only
+    assert "watch" in calls and calls.count("wellness") == 1 and "check" in calls   # wellness again, once free
+    assert caplog.text.count("is working on wellness") == 1 and "Wellness free again" in caplog.text
+    with single_instance(tmp_path, ("activities", "wellness")):              # nothing left held between cycles
+        pass
+    st.close()
+
+
+def test_one_background_bridge_at_a_time_and_a_backfill_waits_for_a_run(tmp_path, monkeypatch, caplog):
+    from garmin_intervals_bridge import cli
+    monkeypatch.setenv("BRIDGE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("GARMIN_TOKEN_DIR", str(tmp_path / "tokens"))
+    monkeypatch.setenv("INTERVALS_API_KEY", "not-a-real-key")
+    with single_instance(tmp_path, ("run",)):
+        assert main(["run", "--iterations", "1"]) == 1                      # a second background bridge: refused
+    from contextlib import ExitStack
+    run_cycle = ExitStack()
+    run_cycle.enter_context(single_instance(tmp_path, ("activities",)))      # the bridge's cycle in progress
+    monkeypatch.setattr(cli.time, "sleep", lambda s: run_cycle.close())     # ... which ends a moment later
+    monkeypatch.setattr(cli, "sync_enrich", lambda *a, **k: {"seen": 0})
+    monkeypatch.setattr(cli.GarminSource, "login", lambda self, interactive=True: None)
+    with caplog.at_level("INFO"):
+        assert main(["backfill", "--scope", "activities", "--from", "2026-10-01", "--to", "2026-10-02"]) == 0
+    assert "working on activities right now; waiting for it to finish" in caplog.text
 
 
 def test_a_404_answer_is_not_an_outage(tmp_path):

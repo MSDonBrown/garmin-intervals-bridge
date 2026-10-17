@@ -94,15 +94,15 @@ search **Garmin Bridge** and tick what you like.
 
 ## The past (optional, once)
 
-The bridge works from today on. To fill in the past, stop the background
-bridge, run the backfill, start it again:
+The bridge works from today on. To fill in the past, run a backfill; the
+background bridge keeps running and leaves alone what the backfill works on
+(0.11.5 and later – with an older version, stop it first with `autostart --remove`
+and start it again afterwards with `autostart`):
 
 ```bash
 cd ~/GarminBridge
-venv/bin/garmin-intervals-bridge autostart --remove
 venv/bin/garmin-intervals-bridge backfill --scope wellness --from 2026-01-01 --apply
 venv/bin/garmin-intervals-bridge backfill --scope activities --from 2026-09-01 --apply
-venv/bin/garmin-intervals-bridge autostart
 ```
 
 A long backfill takes a while (it is polite to Garmin). Gear of older
@@ -133,8 +133,9 @@ start it again, or it keeps showing the old version (it says so itself from
   folder; `cd ~/GarminBridge` first.
 - **Nothing happens:** `autostart --status` and the end of `bridge.log` say
   why.
-- *"Another bridge instance is running"*: the background bridge is running;
-  stop it first (see *The past*).
+- *"Another bridge instance is running"*: another backfill is still working on
+  that part; wait until it is done (a background bridge older than 0.11.5: stop
+  it first, see *The past*).
 - **Garmin's values gone from an activity after Intervals' "Reprocess file"**:
   `venv/bin/garmin-intervals-bridge enrich <the activity's id or link> --apply`, or
   the web page (`ui`) → *Actions → One activity again*.

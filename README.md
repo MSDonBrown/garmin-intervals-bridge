@@ -640,7 +640,7 @@ the page answers only Home Assistant's ingress).
 | --- | --- |
 | `Garmin login needed` (also as a note in the Intervals calendar) | Run `login` interactively in the same environment the service uses. |
 | `429` during `login` | The mobile login path was refused; the web path usually follows. Do not retry in a loop. |
-| `Another bridge instance is running (wellness)` | A backfill holds that scope's lock; activities keep running. |
+| `Another bridge instance is running (wellness)` | A backfill holds that part; the rest keeps running, and the bridge goes on with it once the backfill is done. For a backfill: another one is still working on that part. `(run)`: a background bridge runs already. |
 | Garmin values gone after *Reprocess file* in Intervals | `enrich <the activity's id or link> --apply`, or the web page's *Actions → One activity again*. |
 | `outcome: unmatched` | The official import has not created the activity yet; the next run looks again. |
 | `status` lists a *pending* upload | Upload mode: the request's outcome is unknown. Check Intervals before `reset-pending`. |

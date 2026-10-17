@@ -246,6 +246,45 @@ def build_parser() -> argparse.ArgumentParser:
 
 ACTIVITY_SCAN_MINUTES = 120     # run loop, enrich mode: the poll catches new activities in between
 TICK_SECONDS = 60               # run loop: how often it asks whether a poll is due
+PART_BUSY_RETRY = 300           # run loop: a full run that left out a part a backfill works on comes back this soon
+BUSY_WAIT_SECONDS = 300         # backfill: how long it waits for its part while a regular run finishes
+
+
+def _take_part(data_dir: Path, part: str, locks: ExitStack, log: logging.Logger, *, wait: float = 0) -> None:
+    """Hold `part` for this command; a backfill waits up to `wait` seconds while a regular run (a
+    cycle of the background bridge, a timer's run) finishes with it."""
+    deadline, said = time.monotonic() + wait, False
+    while True:
+        try:
+            locks.enter_context(single_instance(data_dir, (part,)))
+            return
+        except InstanceBusy:
+            if time.monotonic() >= deadline:
+                raise
+            if not said:
+                log.info("The bridge is working on %s right now; waiting for it to finish", part)
+                said = True
+            time.sleep(5)
+
+
+def _free_parts(data_dir: Path, cycle: ExitStack, busy: set[str], log: logging.Logger) -> set[str]:
+    """Activities and wellness, each held for this one cycle of the run loop – unless a backfill
+    (or a manual sync) is working on it: then the loop leaves that part alone and goes on with it
+    once it is done. Said once when a part becomes busy and once when it is free again."""
+    free = set()
+    for part in ("activities", "wellness"):
+        try:
+            cycle.enter_context(single_instance(data_dir, (part,)))
+        except InstanceBusy:
+            if part not in busy:
+                busy.add(part)
+                log.info("Another bridge process (a backfill?) is working on %s: left alone until it is done", part)
+            continue
+        free.add(part)
+        if part in busy:
+            busy.discard(part)
+            log.info("%s free again: the bridge goes on with it", part.capitalize())
+    return free
 
 
 def _gear_recent(settings: Settings, store: Store, intervals: IntervalsClient, *, apply: bool) -> dict:
@@ -286,18 +325,26 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
     (log.warning if source.startswith("fallback") else log.info)(
         "Day boundary: %s (%s)%s", settings.timezone.key, source,
         "; set BRIDGE_TIMEZONE to yours" if source.startswith("fallback") else "")
+    busy: set[str] = set()
     while iterations is None or count < iterations:
         count += 1
         now = time.time()
+        cycle = ExitStack()                             # the parts this cycle holds, given back before the pause
         try:
+            free = _free_parts(settings.data_dir, cycle, busy, log)
             if intervals_paused(store):
                 pass                                    # Intervals asked for a break (429): nothing at all
+            elif now >= next_sync and not free:
+                next_sync = now + PART_BUSY_RETRY       # a backfill on both parts: look again soon
             elif now >= next_sync:
                 garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
                 if hasattr(intervals, "forget_custom_items"):
                     intervals.forget_custom_items()      # fields added since: seen by this full run
-                results: dict = {"apply": apply, "scope": "all", "mode": mode}
-                if mode == "upload":
+                results: dict = {"apply": apply, "scope": "all" if len(free) == 2 else next(iter(free)),
+                                 "mode": mode, "activities": {}, "wellness": {}}
+                if "activities" not in free:
+                    pass                                # a backfill works on it: it comes back with the next one
+                elif mode == "upload":
                     results["activities"] = sync_activities(settings, garmin, intervals, store, apply=apply,
                                                             allow_upload=True, catch_up=True)
                     gear_result = _gear_recent(settings, store, intervals, apply=apply)
@@ -310,7 +357,8 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                         gear_result = _gear_recent(settings, store, intervals, apply=apply)
                         if gear_result:
                             results["gear"] = gear_result
-                results["wellness"] = sync_wellness(settings, garmin, intervals, store, apply=apply)
+                if "wellness" in free:
+                    results["wellness"] = sync_wellness(settings, garmin, intervals, store, apply=apply)
                 results["garmin_requests"] = garmin.requests
                 store.record_run("sync", results, started=now)
                 if mode == "upload" and (results["activities"].get("uploaded") or results["activities"].get(
@@ -326,18 +374,20 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 key, label = labels[(mode, apply)]
                 done = a.get(key, 0)
                 log.info("Full run: %d activities seen, %d %s; wellness %d days checked, %d written; "
-                         "%d Garmin requests", a["seen"], done, label, w["days_checked"], w["writes"], garmin.requests)
-                next_sync, failures = now + sync_minutes * 60, 0
+                         "%d Garmin requests", a.get("seen", 0), done, label, w.get("days_checked", 0),
+                         w.get("writes", 0), garmin.requests)
+                next_sync, failures = now + (sync_minutes * 60 if len(free) == 2 else PART_BUSY_RETRY), 0
             elif not polling.due(settings, store, now, poll_seconds, mode)[0]:
                 pass                                    # quiet hours, or not yet: the full runs go on
             elif mode == "upload":
                 polling.note_look(store, now)
                 garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
-                result = sync_activities(settings, garmin, intervals, store, apply=apply, allow_upload=True,
-                                         activity_days=2)
+                result = (sync_activities(settings, garmin, intervals, store, apply=apply, allow_upload=True,
+                                          activity_days=2) if "activities" in free else {})
                 if result.get("uploaded"):
                     result["gear"] = _gear_recent(settings, store, intervals, apply=apply)
-                result["wellness"] = wellness_check(settings, garmin, intervals, store, apply=apply)
+                if "wellness" in free:
+                    result["wellness"] = wellness_check(settings, garmin, intervals, store, apply=apply)
                 store.record_run("watch", {"apply": apply, "mode": mode, "garmin_requests": garmin.requests, **result},
                                  started=now)
                 if result.get("uploaded") or result.get("would_upload"):
@@ -347,8 +397,9 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 # the poll shares the full run's Garmin session: count only its own requests
                 polling.note_look(store, now)
                 before = garmin.requests
-                result = watch_once(settings, garmin, intervals, store, apply=apply)
-                wellness = wellness_check(settings, garmin, intervals, store, apply=apply)
+                result = (watch_once(settings, garmin, intervals, store, apply=apply) if "activities" in free
+                          else {"new": 0})
+                wellness = wellness_check(settings, garmin, intervals, store, apply=apply) if "wellness" in free else {}
                 if wellness.get("intervals_checks"):
                     result["wellness"] = wellness
                 store.record_run("watch", {"apply": apply, "garmin_requests": garmin.requests - before, **result},
@@ -384,6 +435,8 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
             if now >= next_sync:             # the full run failed: again after a growing break, not each tick
                 failures += 1
                 next_sync = max(next_sync, time.time() + min(sync_minutes * 60, 300 * 2 ** (failures - 1)))
+        finally:
+            cycle.close()                    # a backfill may take a part during the pause
         if iterations is None or count < iterations:
             # wake when the next look is due (within a tick), for a full run at the latest
             wait = polling.seconds_to_next(settings, store, time.time(), poll_seconds, mode)
@@ -598,8 +651,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         scope = getattr(args, "scope", None)
         lock_scopes = (("backup",) if args.cmd == "backup"         # the past, next to a running bridge
+                       # the background bridge: one at a time; activities and wellness it takes per cycle
+                       # (run_loop), so that a backfill can run next to it
+                       else ("run",) if args.cmd == "run"
                        else ("activities", "wellness") if scope in (None, "all")
-                       and args.cmd in ("sync", "run", "watch")
+                       and args.cmd in ("sync", "watch")
                        else ("wellness",) if scope == "wellness"
                        else ("health",) if args.cmd == "health"
                        # gear touches only the gear field: next to a running `run`, only not twice at once
@@ -615,7 +671,8 @@ def main(argv: list[str] | None = None) -> int:
         held: list[str] = []
         for lock_scope in lock_scopes:
             try:
-                locks.enter_context(single_instance(settings.data_dir, (lock_scope,)))
+                _take_part(settings.data_dir, lock_scope, locks, log,
+                           wait=BUSY_WAIT_SECONDS if args.cmd == "backfill" else 0)
                 held.append(lock_scope)
             except InstanceBusy as exc:
                 if args.cmd not in ("watch", "sync"):
@@ -799,7 +856,9 @@ def main(argv: list[str] | None = None) -> int:
                         except (ValueError, OSError) as exc:       # the bridge runs on without its page
                             log.error("No web page: %s", exc)
                     if mode == "backup":
-                        return run_backup_loop(settings, store, every_minutes=every, iterations=args.iterations)
+                        with single_instance(settings.data_dir, ("activities", "wellness")):
+                            return run_backup_loop(settings, store, every_minutes=every,
+                                                   iterations=args.iterations)
                     return run_loop(settings, store, apply=args.apply, poll_seconds=poll,
                                     sync_minutes=every, iterations=args.iterations, mode=mode)
                 if args.cmd == "backup":

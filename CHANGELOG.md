@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.5 — unreleased
+
+### Changed
+
+- **A backfill next to the running bridge:** the background bridge (`run`: Windows, the Mac,
+  Docker, Home Assistant) held activities and wellness for as long as it ran, so a backfill had
+  to wait until it was stopped. It now takes them per cycle, like the systemd timers: whatever
+  a backfill works on, it leaves alone – and says so once – and goes on with it when the
+  backfill is done. Only one background bridge runs at a time, as before. A backfill that
+  starts while a regular run is busy with its part waits up to five minutes instead of
+  stopping (thanks Jeroen_Doesburg in the forum).
+
 ## 0.11.4 — 2026-10-17
 
 A computer that is only on now and then catches up; Windows, the web page and setup say

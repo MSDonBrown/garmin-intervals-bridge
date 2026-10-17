@@ -81,14 +81,14 @@ search **Garmin Bridge** and tick what you like.
 
 ## The past (optional, once)
 
-The bridge works from today on. To fill in the past, stop the background
-bridge, run the backfill, start it again:
+The bridge works from today on. To fill in the past, run a backfill; the
+background bridge keeps running and leaves alone what the backfill works on
+(0.11.5 and later – with an older version, stop it first with `autostart --remove`
+and start it again afterwards with `autostart`):
 
 ```powershell
-py -m garmin_intervals_bridge autostart --remove
 py -m garmin_intervals_bridge backfill --scope wellness --from 2026-01-01 --apply
 py -m garmin_intervals_bridge backfill --scope activities --from 2026-09-01 --apply
-py -m garmin_intervals_bridge autostart
 ```
 
 A long backfill takes a while (it is polite to Garmin). Gear of older
@@ -121,8 +121,9 @@ start it again, or it keeps showing the old version (it says so itself from
   App Control stopped `garmin-intervals-bridge.exe`. Use
   `py -m garmin_intervals_bridge …` as in this guide; the background bridge
   already starts that way.
-- *"Another bridge instance is running"*: the background bridge is running;
-  stop it first (see *The past*).
+- *"Another bridge instance is running"*: another backfill is still working on
+  that part; wait until it is done (a background bridge older than 0.11.5: stop
+  it first, see *The past*).
 - *"This window runs as administrator"*, or *PermissionError* / *Access is
   denied* after something ran in such a window: folders created from an
   administrator window belong to the Administrators group, and the background
