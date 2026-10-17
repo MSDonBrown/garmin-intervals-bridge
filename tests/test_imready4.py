@@ -237,6 +237,7 @@ def test_the_morning_wellness_run_writes_the_advice_after_the_night(tmp_path):
     st, g, _ = fresh(tmp_path)
     i = Both()
     today = date(2026, 10, 10)
+    st.set_meta(f"wellness:morning:{today - timedelta(days=1)}", "ok")    # Garmin delivers this person's nights
     for r in history(day=today, today_rhr=None):
         i.records[date.fromisoformat(r["id"])] = {k: v for k, v in r.items() if k != "id"}
     s = SimpleNamespace(data_dir=tmp_path, timezone=TZ, wellness_days=2, wellness_profile="all", activity_days=3,
@@ -250,6 +251,38 @@ def test_the_morning_wellness_run_writes_the_advice_after_the_night(tmp_path):
     assert [w for w in i.writes if "TrainingAdvice" in w[1]] == [(today, {"TrainingAdvice": 3})]
     wellness_check(s, g, i, st, apply=True, now=morning_at(10, 30), throttle=False)
     assert len([w for w in i.writes if "TrainingAdvice" in w[1]]) == 1      # once a day
+    st.close()
+
+
+def test_without_a_garmin_watch_at_night_the_advice_takes_the_values_from_intervals(tmp_path):
+    # MedTechCD in the forum: a Coros watch, Kubios HRV into Intervals, Garmin only on the bike
+    from test_wellness_schedule import Intervals as WellnessIntervals
+    from test_wellness_schedule import at as morning_at
+    from test_wellness_schedule import fresh
+
+    from garmin_intervals_bridge.sync import wellness_check
+
+    class Both(WellnessIntervals):
+        def custom_items(self):
+            return [FIELD_ITEM]
+
+        def wellness_range(self, oldest, newest, cols=None):
+            return [{**r, "id": d.isoformat()} for d, r in sorted(self.records.items())
+                    if oldest <= d <= newest]
+
+    st, g, _ = fresh(tmp_path)                                               # Garmin had no night all week
+    i = Both()
+    today = date(2026, 10, 10)
+    for r in history(day=today, today_hrv=None, today_rhr=None):
+        i.records[date.fromisoformat(r["id"])] = {k: v for k, v in r.items() if k != "id"}
+    s = SimpleNamespace(data_dir=tmp_path, timezone=TZ, wellness_days=2, wellness_profile="all", activity_days=3,
+                        imready4=True)
+    wellness_check(s, g, i, st, apply=True, now=morning_at(7), throttle=False)
+    assert not [w for w in i.writes if "TrainingAdvice" in w[1]]            # the values are not there yet
+    i.records[today].update(hrv=50.0, restingHR=50)                          # Kubios, through another tool
+    m = wellness_check(s, g, i, st, apply=True, now=morning_at(8, 30), throttle=False)
+    assert m.get("morning", 0) == 0 and m["advice"]["action"] == "written"   # no Garmin night needed
+    assert [w for w in i.writes if "TrainingAdvice" in w[1]] == [(today, {"TrainingAdvice": 3})]
     st.close()
 
 

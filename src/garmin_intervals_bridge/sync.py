@@ -377,6 +377,11 @@ CATCH_UP_DAYS = 14              # after a pause the scheduled runs look back to 
 CATCH_UP_KEY = "catchup:"       # + scope: the first day a pause left to read, until a run has read it
 
 
+def _garmin_nights(store: Store, day: date) -> bool:
+    """Whether Garmin delivers this person's nights: a morning read found sleep within the last week."""
+    return any(store.get_meta(f"wellness:morning:{day - timedelta(days=o)}") for o in range(1, GARMIN_NIGHT_DAYS + 1))
+
+
 def note_pause(settings: Settings, store: Store, today: date) -> None:
     """A computer switched on once a week, a server down for days, a Garmin sign-in that waited:
     the bridge's last run is older than its usual window. Remember, for activities and wellness,
@@ -816,6 +821,7 @@ MORNING_ENDPOINTS = ("sleep", "hrv", "training_readiness", "body_composition",
                      "endurance_score", "hill_score", "max_metrics", "fitness_age", "race_predictions")
 CHECK_MINUTES = 10              # Intervals pre-check cadence; costs no Garmin request
 SIGNAL_DAYS = 2                 # official sleep seen this recently: wait for it instead of asking Garmin
+GARMIN_NIGHT_DAYS = 7           # no night from Garmin this long: the advice does not wait for one
 FALLBACK_SLOTS = ((6, 30), (7, 30), (8, 30), (10, 0), (12, 0), (16, 0), (20, 0))
 LATE_SLOTS = ((12, 0), (16, 0), (20, 0))     # with a signal: in case it stays silent all day
 MORNING_BACKOFF_MINUTES = (30, 60, 120, 240)
@@ -925,8 +931,11 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
     unwritten = [d for d in past + [current]
                  if apply and (state := store.wellness_state(d))[0] and not state[1]
                  and (d == current and morning or store.get_meta(f"wellness:final:{d}"))]
-    advice_due = bool(morning) and (imready4.due(settings, store, current, now_ts, apply=apply)
-                                    or hrvtrend.due(settings, store, current, now_ts, apply=apply))
+    # the advice waits for the night Garmin reads – unless Garmin has none: no Garmin watch at night,
+    # HRV and resting HR come into Intervals from elsewhere, and the advice takes them from there
+    night_read = bool(morning) or not _garmin_nights(store, current)
+    advice_due = night_read and (imready4.due(settings, store, current, now_ts, apply=apply)
+                                 or hrvtrend.due(settings, store, current, now_ts, apply=apply))
     if (morning and not watching and not pending_past and not readiness_due and not unwritten and not files_due
             and not advice_due):
         return metrics
@@ -1079,7 +1088,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
 
     # the advice once the night (and any Health Snapshot correction) is in Intervals: Intervals requests only
     for key, feature in (("advice", imready4), ("trend_advice", hrvtrend)):
-        if morning and feature.due(settings, store, current, now_ts, apply=apply):
+        if (morning or night_read) and feature.due(settings, store, current, now_ts, apply=apply):
             try:
                 metrics[key] = feature.morning(settings, intervals, store, current, now, apply=apply)
             except Exception as exc:                     # never at the cost of the wellness run

@@ -29,6 +29,12 @@
   and a second `ui` whose port is still taken by the old page says so instead of
   "Address already in use" (on Windows two pages could even share the port). Thanks
   Lukasz_Pludowski.
+- **ImReady4 and HRV-trend advice without a Garmin watch at night:** the advice waited for the
+  night the bridge reads from Garmin – which never comes when Garmin only records the rides (an
+  Edge) and HRV and resting HR reach Intervals from elsewhere (another watch, Kubios). Now it
+  waits for Garmin's night only when Garmin delivered one in the last week; otherwise it takes
+  today's values from Intervals as soon as they are there. Run by hand it always worked
+  (thanks MedTechCD in the forum).
 - **`setup` on Windows, pasting the API key:** in Windows Terminal (Windows 11's default) the
   hint says Ctrl+V; in the classic console a right-click, on a trackpad a two-finger tap
   (thanks Andy_Drake in the forum).
