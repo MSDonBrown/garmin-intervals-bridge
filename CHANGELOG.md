@@ -2,6 +2,14 @@
 
 ## 0.11.5 — unreleased
 
+### Fixed
+
+- **Swap in place marked the intervals as edited.** The bridge always asked Intervals to keep
+  the activity's intervals, and Intervals then flags them as edited – on a fresh import that
+  nobody had touched. Now it keeps them only when they were edited; otherwise Intervals finds
+  them anew in the complete file. Edited intervals stay as before. (Activities swapped with
+  0.11.3 or 0.11.4 keep the flag.)
+
 ### Changed
 
 - **A backfill next to the running bridge:** the background bridge (`run`: Windows, the Mac,

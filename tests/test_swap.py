@@ -335,6 +335,14 @@ def test_replace_does_not_trust_the_file_of_an_earlier_activity(tmp_path, monkey
     st.close()
 
 
+def test_replace_keeps_only_intervals_someone_edited(tmp_path):
+    # keep_intervals on unedited ones made Intervals flag them edited (verified on the server, 18.10.)
+    st, i = Store(tmp_path), SwapIntervals()                          # icu_intervals_edited False
+    replace_activity("42", "i42", GarminFake(), i, st, apply=True)
+    assert i.calls == [("replace", "i42", "42.fit", False, True)]     # found anew in the complete file
+    st.close()
+
+
 def test_replace_leaves_other_activities_and_says_when_intervals_had_the_file(tmp_path):
     st, i = Store(tmp_path), SwapIntervals()
     i.unchanged = True                                                # Intervals: file unchanged

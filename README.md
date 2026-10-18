@@ -218,7 +218,8 @@ Garmin). Two methods, `BRIDGE_SWAP_METHOD`:
 
 - `replace` (the default): the original goes into **the same activity** (Intervals'
   *replace file*, `POST /activity/{id}/file`). Same id and link; name, description,
-  comments, edited intervals, RPE, gear and tags stay; **nothing is deleted**. Intervals
+  comments, edited intervals, RPE, gear and tags stay (intervals nobody edited are found anew
+  in the complete file); **nothing is deleted**. Intervals
   still shows the activity as Garmin's import (`source: GARMIN_CONNECT`). Works for the
   past too: `backfill --scope activities --from DATE --swap --apply`.
 - `upload`: the original as **a new activity of your own** (your upload, not

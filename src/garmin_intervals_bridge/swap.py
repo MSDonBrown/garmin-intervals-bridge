@@ -156,7 +156,9 @@ def replace_activity(gid: str, iid: str, garmin: Any, intervals: Any, store: Any
     if not apply:
         return plan
     with single_instance(store.base, ("swap",)):
-        done = intervals.replace_file(iid, path)              # intervals and typed values stay
+        # typed values stay; intervals only when someone edited them – keeping unedited ones would mark
+        # them edited (Intervals' flag), and the complete file finds them anew
+        done = intervals.replace_file(iid, path, keep_intervals=bool(copy.get("icu_intervals_edited")))
         store.atomic_save(partner, original)                   # what Intervals holds now: nothing left to add
         store.drop_enrichment(gid)                             # what the bridge wrote is the file's own now
     if done is None:
