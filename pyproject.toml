@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "garmin-intervals-bridge"
-version = "0.11.4"
+version = "0.11.5"
 description = "Self-hosted Garmin Connect original FIT and wellness sync to Intervals.icu"
 readme = "README.md"
 requires-python = ">=3.12"

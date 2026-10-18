@@ -73,7 +73,7 @@ from Docker Hub or as a Claude Desktop bundle; [more below](#use-it-with-an-ai-c
 | **Rule** | Only what the partner copy lacks; aligned by timestamp; idempotent | Only empty values; locked days skipped; today's running totals wait until tomorrow |
 | **Archive** | Original + partner copy of every activity, Garmin's summary, weather, gear, splits | Raw JSON of every endpoint and the watch's original wellness files (Health Snapshots included), every day |
 
-Version 0.11.4. Verified end to end on one account (fenix 8, Edge 1040); what changed
+Version 0.11.5. Verified end to end on one account (fenix 8, Edge 1040); what changed
 when is in the [CHANGELOG](CHANGELOG.md), where it goes next in the
 [roadmap](docs/ROADMAP.md).
 

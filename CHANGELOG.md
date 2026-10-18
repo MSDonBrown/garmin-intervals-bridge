@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.11.5 — unreleased
+## 0.11.5 — 2026-10-18
+
+Swap in place leaves unedited intervals unedited; a backfill runs next to the background bridge.
 
 ### Fixed
 
