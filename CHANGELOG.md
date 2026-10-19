@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.11.6 — unreleased
+## 0.11.6 — 2026-10-19
+
+Custom fields from FIT messages like `user_profile` – the running threshold pace – are restored too.
 
 ### Fixed
 
