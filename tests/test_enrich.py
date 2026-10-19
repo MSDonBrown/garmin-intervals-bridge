@@ -165,6 +165,19 @@ def test_zero_guard_scripts_mean_no_value_and_keep_their_conversion():
     assert plan["writes"]["LTPaceDetected"] == 100.0 and plan["writes"]["LTHRdetected"] == 165.0
 
 
+def test_a_field_from_a_named_fit_message_by_its_number():
+    # GwenBZH in the forum: running threshold pace, user_profile (message 3) field 37, kept out of the copy
+    item = {"type": "ACTIVITY_FIELD", "content": {"code": "LTPaceDetected", "fit_session_field": "3.37", "script":
+            "activity.isNew ? (activity.LTPaceDetected == 0 ? NaN : activity.LTPaceDetected / 36) : "
+            "(activity.LTPaceDetected == 0 ? NaN : activity.LTPaceDetected)"}}
+    m = load_field_mappings([item])
+    original = {"user_profile": [{37: 146, "speed_setting": "metric"}]}
+    partner = {"user_profile": [{"speed_setting": "metric"}]}                  # Garmin's copy: field 37 gone
+    plan = plan_scalars(original, {"LTPaceDetected": 0}, m, partner)
+    assert plan["writes"] == {"LTPaceDetected": 4.0556}                         # 146 / 36 m/s, about 4:07/km
+    assert plan_scalars({"140": [{37: 146}]}, {}, m)["writes"] == {}           # another message: not this one
+
+
 def test_select_fields_only_accept_their_options():
     m = load_field_mappings(ITEMS)
     plan = plan_scalars({"session": [{188: 0}]}, {}, m)

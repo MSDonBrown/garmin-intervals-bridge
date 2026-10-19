@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.6 — unreleased
+
+### Fixed
+
+- **Custom fields from a FIT message the profile knows, by its number** – `3.37`, say:
+  `user_profile`'s field 37, the running threshold pace. Garmin keeps it out of the copy it sends
+  Intervals since about 12 October; the bridge looked for message `3` and found nothing, because
+  the FIT library names the messages it knows (`user_profile`). It now finds them by number and
+  restores such fields like the others – Garmin's own messages (`140.x`) worked already
+  (thanks GwenBZH in the forum).
+
 ## 0.11.5 — 2026-10-18
 
 Swap in place leaves unedited intervals unedited; a backfill runs next to the background bridge.

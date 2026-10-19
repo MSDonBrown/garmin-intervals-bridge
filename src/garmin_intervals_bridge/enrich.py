@@ -339,12 +339,24 @@ def load_field_mappings(custom_items: list[dict]) -> FieldMappings:
     return out
 
 
+def _message_name(number: str) -> str | None:
+    """The decoder's name for a FIT message number (3 -> user_profile, 18 -> session): it keys the
+    messages the FIT profile knows by name, the others (Garmin's 140, 79 …) by their number."""
+    try:
+        from garmin_fit_sdk import Profile
+        return Profile["types"]["mesg_num"].get(int(number))
+    except Exception:
+        return None
+
+
 def _lookup(messages: dict[str, list[dict]], source: str) -> Any:
-    """Resolve a mapping source against decoded FIT messages; last non-null wins."""
+    """Resolve a mapping source against decoded FIT messages; last non-null wins. "N.M" finds message
+    N by its number or, for a message the profile knows, by its name (3.37: user_profile's field 37,
+    the running threshold pace Garmin keeps out of the copy it sends Intervals)."""
     kind, _, spec = source.partition(":")
     if kind == "mesg":
         mesg, _, fld = spec.partition(".")
-        items, key = messages.get(mesg, []), int(fld)
+        items, key = messages.get(mesg) or messages.get(_message_name(mesg) or "", []), int(fld)
     else:
         items = messages.get("session", [])
         key = int(spec) if spec.isdecimal() else spec
