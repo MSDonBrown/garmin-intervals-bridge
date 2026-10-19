@@ -230,12 +230,18 @@ class FieldMappings:
     unsupported: dict[str, str] = field(default_factory=dict)   # code -> why
 
 
+LOOKUP_VERSION = 2              # raised when the bridge finds more in the same definitions (2: 3.37 by name)
+
+
 def mapping_signature(mappings: FieldMappings) -> str:
     """What the athlete's field definitions currently ask for; a changed signature makes an
-    already enriched activity worth a second look (new fields get added, nothing rewritten)."""
+    already enriched activity worth a second look (new fields get added, nothing rewritten).
+    LOOKUP_VERSION counts too: a bridge that resolves more of the same definitions looks again."""
     def rows(items):
         return sorted(json.dumps(asdict(m), sort_keys=True, default=str) for m in items)
     payload = {"scalars": rows(mappings.scalars), "streams": rows(mappings.streams)}
+    if LOOKUP_VERSION > 1:
+        payload["lookup"] = LOOKUP_VERSION
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
 

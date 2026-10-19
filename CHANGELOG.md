@@ -9,7 +9,9 @@
   Intervals since about 12 October; the bridge looked for message `3` and found nothing, because
   the FIT library names the messages it knows (`user_profile`). It now finds them by number and
   restores such fields like the others – Garmin's own messages (`140.x`) worked already
-  (thanks GwenBZH in the forum).
+  (thanks GwenBZH in the forum). Activities completed before get one more look: in the scan
+  window by themselves, the past with a `backfill --scope activities`; only missing values are
+  added, nothing is overwritten.
 
 ## 0.11.5 — 2026-10-18
 

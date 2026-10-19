@@ -291,6 +291,14 @@ def test_origin_check_catches_a_shifted_origin():
     assert origin_check(with_cadence, time_stream, cadence_only)["stream"] == "cadence"
 
 
+def test_mapping_signature_follows_how_the_bridge_reads_them_too(monkeypatch):
+    from garmin_intervals_bridge import enrich
+    one = FieldMappings(scalars=[ScalarMapping("LTPaceDetected", "mesg:3.37", (("/", 36.0),))])
+    now = mapping_signature(one)
+    monkeypatch.setattr(enrich, "LOOKUP_VERSION", enrich.LOOKUP_VERSION + 1)
+    assert mapping_signature(one) != now                    # finds more in the same definitions: a second look
+
+
 def test_mapping_signature_follows_the_definitions():
     one = FieldMappings(scalars=[ScalarMapping("X", "session:1")])
     same = FieldMappings(scalars=[ScalarMapping("X", "session:1")])
