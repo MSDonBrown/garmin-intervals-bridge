@@ -2,6 +2,14 @@
 
 ## 0.11.7 — unreleased
 
+### Added
+
+- **The web page for the systemd setup:** `deploy/systemd/garmin-intervals-bridge-ui.service`
+  serves it to your network with `BRIDGE_UI_PASSWORD` (no random key that nobody sees), hardened
+  like the other units; `deploy/README.md` says how. The read-only settings and the log page
+  now say where things are under systemd (the env file, the journal) instead of "the
+  container" (thanks Hans_Bakker in the forum).
+
 ### Fixed
 
 - **A short Intervals outage during a full run** (a few 503s, a timeout) ended the scheduled

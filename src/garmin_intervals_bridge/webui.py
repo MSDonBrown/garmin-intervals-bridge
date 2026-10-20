@@ -137,6 +137,17 @@ GARMIN_WAIT = 2.0                          # a quick Garmin answer is shown at o
 GARMIN_REFRESH = 2                         # seconds between the waiting page's reloads (a meta refresh: no script)
 
 
+def settings_source(ingress: bool) -> str:
+    """Where settings come from when there is no settings file to edit here."""
+    if ingress:
+        return "the app's <i>Configuration</i> tab in Home Assistant"
+    if autostart.platform() == "container":
+        return "the container's settings (its environment variables)"
+    if os.getenv("INVOCATION_ID"):                  # a systemd service: its EnvironmentFile
+        return "the service's environment file (<code>/etc/garmin-intervals-bridge/env</code> in the shipped units)"
+    return "the environment the bridge runs with"
+
+
 def installed_version() -> str | None:
     """The version pip has installed now – newer than this process's after an update while it ran."""
     try:
@@ -576,8 +587,7 @@ class UI:
                     ("New activities", self._schedule(settings)),
                     ("Alerts", ", ".join(alerts.channels(settings)) or "none (BRIDGE_ALERT_EMAIL, BRIDGE_NTFY_URL)")]
             table = "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in rows)
-            where = ("the app's <i>Configuration</i> tab in Home Assistant" if self.ingress else
-                     "the container's settings (its environment variables)")
+            where = settings_source(self.ingress)
             return self.page(session, "Settings", f'{message}<section><p>These come from {where}; change them '
                              f'there.</p><table>{table}</table></section>{self._test_form(session, settings)}')
 
@@ -951,8 +961,10 @@ class UI:
     def log_page(self, session: Session, query: dict, form: dict) -> str:
         settings = self.settings()
         if settings.log_file is None or not settings.log_file.is_file():
-            text = ("No log file: set BRIDGE_LOG_FILE (setup does). In a container, its own log shows everything."
-                    if settings.log_file is None else "The log file is empty so far.")
+            text = ("The log file is empty so far." if settings.log_file is not None else
+                    "No log file: under systemd the journal has everything (journalctl -u "
+                    "'garmin-intervals-bridge*')." if os.getenv("INVOCATION_ID") else
+                    "No log file: set BRIDGE_LOG_FILE (setup does). In a container, its own log shows everything.")
             return self.page(session, "Log", f"<section><p>{esc(text)}</p></section>")
         with settings.log_file.open(encoding="utf-8", errors="replace") as fh:
             lines = deque(fh, maxlen=LOG_LINES)

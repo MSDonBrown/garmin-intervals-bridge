@@ -1,0 +1,60 @@
+# garmin-intervals-bridge: the web page for the systemd setup – status, the Garmin sign-in (MFA
+# included), gear and chart plans, the settings (read-only here: they live in the env file) –
+# reachable from the other computers in your network. Optional; the timers need it not.
+#
+# It asks for BRIDGE_UI_PASSWORD (8 characters or more), which goes into
+# /etc/garmin-intervals-bridge/env. Plain http: keep it in your home network, or put it behind a
+# reverse proxy with HTTPS. This computer only: replace 0.0.0.0 by 127.0.0.1 below and reach it
+# through an SSH tunnel (ssh -L 8765:127.0.0.1:8765 <this computer>).
+#
+#   cp deploy/systemd/garmin-intervals-bridge-ui.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now garmin-intervals-bridge-ui
+#   then open http://<this computer>:8765
+[Unit]
+Description=Garmin -> Intervals.icu bridge: web page
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gib
+Group=gib
+UMask=0077
+WorkingDirectory=/var/lib/garmin-intervals-bridge
+EnvironmentFile=/etc/garmin-intervals-bridge/env
+Environment=BRIDGE_DATA_DIR=/var/lib/garmin-intervals-bridge
+Environment=GARMIN_TOKEN_DIR=/var/lib/garmin-intervals-bridge/tokens
+Environment=PYTHONDONTWRITEBYTECODE=1
+# the same zone as in the other units
+Environment=BRIDGE_TIMEZONE=Europe/Vienna
+ExecStart=/opt/garmin-intervals-bridge/venv/bin/garmin-intervals-bridge ui --host 0.0.0.0 --port 8765 --no-browser
+# again after a crash; a setting that is wrong (no password) stops it, with the reason in the journal
+Restart=on-abnormal
+RestartSec=30
+# Hardening as in the other units: the network, its data directory and nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/garmin-intervals-bridge
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+PrivateDevices=yes
+RestrictRealtime=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+ProtectProc=invisible
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

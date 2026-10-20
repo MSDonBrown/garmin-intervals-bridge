@@ -214,6 +214,7 @@ def test_settings_are_saved_and_the_key_is_checked_but_never_shown(page, env):
 
 
 def test_settings_from_a_container_are_shown_not_edited(page, env, monkeypatch, tmp_path):
+    monkeypatch.setattr(webui.autostart, "platform", lambda: "container")
     monkeypatch.delenv("BRIDGE_ENV_FILE")
     monkeypatch.chdir(tmp_path / "data")
     monkeypatch.setenv("INTERVALS_API_KEY", "k")
@@ -500,3 +501,21 @@ def test_setup_says_what_the_garmin_sign_in_was_about():
     assert wizard._garmin(p, settings, Source) is None
     assert "not about your password" in said[-1] and "mobile+cffi failed" in said[-1]
     assert "check e-mail and password" not in said[-1]
+
+
+def test_read_only_settings_say_where_they_come_from(monkeypatch):
+    monkeypatch.setattr(webui.autostart, "platform", lambda: "linux")
+    monkeypatch.setenv("INVOCATION_ID", "a-systemd-service")              # the shipped ui unit
+    assert "/etc/garmin-intervals-bridge/env" in webui.settings_source(False)
+    monkeypatch.delenv("INVOCATION_ID")
+    assert webui.settings_source(False) == "the environment the bridge runs with"
+    monkeypatch.setattr(webui.autostart, "platform", lambda: "container")
+    assert "container" in webui.settings_source(False) and "Home Assistant" in webui.settings_source(True)
+
+
+def test_the_shipped_ui_unit_asks_for_the_password_and_listens_for_the_network():
+    from pathlib import Path
+    unit = (Path(__file__).parent.parent / "deploy" / "systemd" / "garmin-intervals-bridge-ui.service").read_text()
+    assert "ui --host 0.0.0.0" in unit and "--no-browser" in unit and "BRIDGE_UI_PASSWORD" in unit
+    assert "User=gib" in unit and "ReadWritePaths=/var/lib/garmin-intervals-bridge" in unit
+    assert "Restart=on-abnormal" in unit                                    # no restart loop without a password

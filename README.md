@@ -509,7 +509,8 @@ users of the computer nor web pages in your browser can use it.
 
 Next to a running bridge – a container on a NAS – set `BRIDGE_UI_PORT=8765` and
 `BRIDGE_UI_PASSWORD` (8 characters or more) and publish the port; the page then asks
-for that password. It is plain http: keep it in your home network or put it behind your
+for that password. With the systemd units, `deploy/systemd/garmin-intervals-bridge-ui.service`
+serves it the same way (see [deploy/README.md](deploy/README.md)). It is plain http: keep it in your home network or put it behind your
 NAS's HTTPS reverse proxy. Every form carries a per-session token, a page on 127.0.0.1
 answers only to its own host name, and nothing is written to Intervals or Garmin without
 a button that says so. Standard library only, no JavaScript.
