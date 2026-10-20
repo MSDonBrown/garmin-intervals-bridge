@@ -506,6 +506,27 @@ def test_one_background_bridge_at_a_time_and_a_backfill_waits_for_a_run(tmp_path
     assert "working on activities right now; waiting for it to finish" in caplog.text
 
 
+def test_a_short_intervals_outage_is_a_warning_for_the_watch_and_the_full_run(tmp_path, monkeypatch, caplog):
+    # 20.10. 06:00 on the server: the watch warned, the full run failed and sent an alert mail
+    import requests
+
+    from garmin_intervals_bridge import cli
+    monkeypatch.setenv("BRIDGE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("GARMIN_TOKEN_DIR", str(tmp_path / "tokens"))
+    monkeypatch.setenv("INTERVALS_API_KEY", "not-a-real-key")
+    outage = requests.exceptions.RetryError("intervals.icu: too many 503 error responses")
+    monkeypatch.setattr(cli, "sync_enrich", lambda *a, **k: (_ for _ in ()).throw(outage))
+    monkeypatch.setattr(cli, "watch_once", lambda *a, **k: (_ for _ in ()).throw(outage))
+    monkeypatch.setattr(cli.polling, "due", lambda *a, **k: (True, "due"))
+    monkeypatch.setattr(cli.GarminSource, "login", lambda self, interactive=True: None)
+    with caplog.at_level("WARNING"):
+        assert main(["watch"]) == 0
+        assert main(["sync", "--scope", "activities"]) == 0                # no failed unit, no alert mail
+    assert "Look for new activities failed" in caplog.text and "Full run failed" in caplog.text
+    monkeypatch.setattr(cli, "sync_enrich", lambda *a, **k: (_ for _ in ()).throw(ValueError("a real bug")))
+    assert main(["sync", "--scope", "activities"]) == 1                    # anything else still fails
+
+
 def test_a_404_answer_is_not_an_outage(tmp_path):
     from garmin_intervals_bridge.garmin import _is_transient
 

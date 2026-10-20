@@ -1004,10 +1004,11 @@ def main(argv: list[str] | None = None) -> int:
                 store.close()
     except Exception as exc:
         # Do not echo possibly credential-bearing exception messages for requests failures.
-        if getattr(args, "cmd", None) == "watch" and transient(exc):
+        if getattr(args, "cmd", None) in ("watch", "sync") and transient(exc):
             # a server that is briefly away: no failed unit, no alert mail; the next look (at the
-            # pace) tries again, and health reports a watch that keeps failing (3 h)
-            log.warning("Look for new activities failed: %s; the next one tries again", request_error(exc))
+            # pace) or full run tries again, and health reports a watch or sync that keeps failing (3 h)
+            what = "Look for new activities" if args.cmd == "watch" else "Full run"
+            log.warning("%s failed: %s; the next one tries again", what, request_error(exc))
             return 0
         if exc.__class__.__module__.startswith("requests"):
             log.error("HTTP/API request failed: %s", request_error(exc))

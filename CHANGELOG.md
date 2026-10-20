@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.7 — unreleased
+
+### Fixed
+
+- **A short Intervals outage during a full run** (a few 503s, a timeout) ended the scheduled
+  `sync` with an error – under systemd a failed unit and an alert mail – although the next run
+  half an hour later went through. It is now a warning, as it already was for the watch; a sync
+  that keeps failing is still reported by the health check. Any other error fails as before.
+
 ## 0.11.6 — 2026-10-19
 
 Custom fields from FIT messages like `user_profile` – the running threshold pace – are restored too.
