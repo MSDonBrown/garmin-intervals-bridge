@@ -60,7 +60,7 @@ jobs:
             if [ "$MOVE_LATEST" = "true" ]; then tags="${tags},${image}:latest"; fi
           done
           echo "tags=${tags}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64

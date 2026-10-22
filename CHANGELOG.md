@@ -10,6 +10,10 @@
   now say where things are under systemd (the env file, the journal) instead of "the
   container" (thanks Hans_Bakker in the forum).
 
+### Changed
+
+- The container image workflow uses `docker/build-push-action` v7 (Dependabot).
+
 ### Fixed
 
 - **`setup`, pasting the API key:** the hint no longer guesses the window. It says Ctrl+V, which
