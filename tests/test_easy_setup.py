@@ -578,20 +578,20 @@ def test_what_a_paste_brings_along_is_no_part_of_the_key(monkeypatch):
     script = Script(answers=[], secrets=["\x16", "\x16\x16", '"good-key"\r\n'])
     script.say = said.append
     monkeypatch.setattr(wizard.os, "name", "nt")
-    monkeypatch.delenv("WT_SESSION", raising=False)                      # the classic console
     key, _ = wizard._intervals_key(script, "", lambda key: WizardIntervals(key))
     assert key == "good-key"
-    assert said.count("Nothing arrived – paste with a right-click (on a trackpad: a two-finger tap), then "
-                      "Enter.") == 2
-    assert any("Paste it with a right-click (on a trackpad: a two-finger tap): in this window Ctrl+V" in line
-               for line in said)
+    assert any(line.endswith("Paste it with Ctrl+V.") for line in said)    # what works in Windows Terminal
+    assert said.count("Nothing arrived – this window does not pass Ctrl+V on to a hidden prompt: paste with a "
+                      "right-click (on a trackpad a two-finger tap) or Ctrl+Shift+V, then Enter.") == 2
 
 
-def test_windows_terminal_is_told_ctrl_v_works(monkeypatch):
+def test_a_linux_terminal_is_told_ctrl_shift_v(monkeypatch):
     said = []
-    script = Script(answers=[], secrets=["good-key"])
+    script = Script(answers=[], secrets=["\x16", "good-key"])
     script.say = said.append
-    monkeypatch.setattr(wizard.os, "name", "nt")
-    monkeypatch.setenv("WT_SESSION", "a-session")                       # Windows Terminal, Windows 11's default
+    monkeypatch.setattr(wizard.os, "name", "posix")
+    monkeypatch.setattr(wizard.sys, "platform", "linux")
     wizard._intervals_key(script, "", lambda key: WizardIntervals(key))
-    assert any("Paste it with Ctrl+V or a right-click." in line for line in said)
+    assert any(line.endswith("Paste it with Ctrl+Shift+V.") for line in said)
+    assert "Nothing arrived – Ctrl+V does not paste in a terminal: paste with Ctrl+Shift+V or a right-click → " \
+           "Paste, then Enter." in said

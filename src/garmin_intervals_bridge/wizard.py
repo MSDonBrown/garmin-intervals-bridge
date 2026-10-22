@@ -166,16 +166,17 @@ def _athlete_name(athlete: dict) -> str:
     return str(name or athlete.get("id") or "your account")
 
 
-def _paste_hint() -> tuple[str, str] | None:
-    """Windows: how a paste reaches the hidden key prompt in this very window – (how, why). Windows
-    Terminal (Windows 11's default) pastes Ctrl+V itself; the classic console hands it over as ^V,
-    and a trackpad's right-click is a two-finger tap (Andy_Drake in the forum did not find it)."""
-    if os.name != "nt":
-        return None
-    if os.getenv("WT_SESSION"):
-        return "Ctrl+V or a right-click", ""
-    return ("a right-click (on a trackpad: a two-finger tap)",
-            ": in this window Ctrl+V does not reach a hidden prompt")
+def _paste_hint() -> tuple[str, str, str] | None:
+    """How a paste reaches the hidden key prompt: (first try, why it may not, the other ways). No
+    guessing at the window (Barry_Turner in the forum got the classic console's advice in a window
+    where Ctrl+Shift+V pasted): Windows Terminal pastes Ctrl+V itself, the classic console hands
+    it over as ^V – which is dropped, so "nothing arrived" names the other ways."""
+    if os.name == "nt":
+        return ("Ctrl+V", "this window does not pass Ctrl+V on to a hidden prompt",
+                "a right-click (on a trackpad a two-finger tap) or Ctrl+Shift+V")
+    if sys.platform != "darwin":
+        return ("Ctrl+Shift+V", "Ctrl+V does not paste in a terminal", "Ctrl+Shift+V or a right-click → Paste")
+    return None                                       # the Mac: Cmd+V, everywhere
 
 
 def _intervals_key(p: Prompt, saved: str, client: Callable[[str], Any]) -> tuple[str, Any] | None:
@@ -193,11 +194,11 @@ def _intervals_key(p: Prompt, saved: str, client: Callable[[str], Any]) -> tuple
     paste = _paste_hint()
     p.say("Your Intervals.icu API key: intervals.icu -> Settings -> Developer Settings -> API key.\n"
           "Copy it from there; it is not shown while you paste it, and it stays on this computer."
-          + (f"\nPaste it with {paste[0]}{paste[1]}." if paste else ""))
+          + (f"\nPaste it with {paste[0]}." if paste else ""))
     for _ in range(3):
         key = p.secret("API key").strip("\"'").strip()          # quotes copied along are no part of it
         if not key:
-            p.say("Nothing arrived" + (f" – paste with {paste[0]}, then Enter." if paste else "."))
+            p.say("Nothing arrived" + (f" – {paste[1]}: paste with {paste[2]}, then Enter." if paste else "."))
             continue
         try:
             intervals = client(key)
@@ -206,7 +207,7 @@ def _intervals_key(p: Prompt, saved: str, client: Callable[[str], Any]) -> tuple
             status = getattr(exc.response, "status_code", None)
             if status in (401, 403) and len(key) < 16:
                 p.say(f"Intervals refused it – only {len(key)} characters arrived, an API key is longer."
-                      + (f" Paste with {paste[0]}, then Enter." if paste else ""))
+                      + (f" Paste with {paste[2]}, then Enter." if paste else ""))
             else:
                 p.say("Intervals refused this key; check that it is complete." if status in (401, 403)
                       else f"Intervals answered with an error ({status}); try again.")

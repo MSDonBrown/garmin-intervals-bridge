@@ -33,9 +33,9 @@ It asks, one question at a time (not on Intervals.icu? answer **2** to the first
 
 1. **Your Intervals.icu API key** – in Intervals.icu under *Settings →
    Developer Settings → API key*. Copy it and paste it into PowerShell
-   (`Ctrl`+`V`; in the older blue PowerShell window a right-click instead – on a
-   trackpad a two-finger tap); it is not shown while you paste, then press
-   Enter. The bridge checks it right away and greets you by name.
+   (`Ctrl`+`V`; if setup says *nothing arrived*, a right-click or `Ctrl`+`Shift`+`V`
+   instead – on a trackpad a right-click is a two-finger tap); it is not shown
+   while you paste, then press Enter. The bridge checks it right away and greets you by name.
 2. **Your time zone** – it shows the one Windows uses; Enter if it is right.
 3. **Garmin Connect** – your e-mail, password and, if Garmin asks, the MFA
    code. The password is used for this one sign-in and not stored; the

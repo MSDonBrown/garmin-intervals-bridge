@@ -12,6 +12,11 @@
 
 ### Fixed
 
+- **`setup`, pasting the API key:** the hint no longer guesses the window. It says Ctrl+V, which
+  works in Windows Terminal; when the classic console hands Ctrl+V over as a control character,
+  "nothing arrived" names the other ways – a right-click (on a trackpad a two-finger tap) or
+  Ctrl+Shift+V. Linux terminals get Ctrl+Shift+V (thanks Barry_Turner in the forum, whose window
+  got the classic console's advice).
 - **A short Intervals outage during a full run** (a few 503s, a timeout) ended the scheduled
   `sync` with an error – under systemd a failed unit and an alert mail – although the next run
   half an hour later went through. It is now a warning, as it already was for the watch; a sync
