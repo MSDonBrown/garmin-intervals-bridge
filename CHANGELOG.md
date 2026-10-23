@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.11.7 — unreleased
+## 0.11.7 — 2026-10-23
+
+The past from the web page (no terminal needed, e.g. in Home Assistant); a short Intervals outage is no
+alarm any more; the web page for the systemd setup.
 
 ### Added
 
@@ -9,7 +12,6 @@
   – as a `backfill` in the background, next to the running bridge. You see what it will do
   first; the Log shows how far it got. In Home Assistant, which has no terminal, this was not
   possible before (thanks Sveen in the forum for the nudge).
-
 - **The web page for the systemd setup:** `deploy/systemd/garmin-intervals-bridge-ui.service`
   serves it to your network with `BRIDGE_UI_PASSWORD` (no random key that nobody sees), hardened
   like the other units; `deploy/README.md` says how. The read-only settings and the log page
