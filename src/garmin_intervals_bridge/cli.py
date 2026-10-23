@@ -11,7 +11,7 @@ from contextlib import ExitStack
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import __version__, alerts, autostart, hrvtrend, imready4, notices, polling, webui, wizard
+from . import __version__, alerts, autostart, hrvtrend, imready4, notices, polling, tuning, webui, wizard
 from .backup import backup_once, backup_range
 from .backup import describe as describe_backup
 from .charts import setup_charts
@@ -40,6 +40,8 @@ from .sync import (
     watch_once,
     wellness_check,
 )
+
+_t = tuning.get
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -113,6 +115,19 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--activity-interval", type=int, default=0, metavar="MINUTES",
                       help="Enrich mode, for scheduled runs: skip the Garmin activity scan while the last one "
                            "is younger than this (the watch enriches new activities in between)")
+    now = sub.add_parser("sync-now", help="Sync right now, on request (for a person or an agent that knows something "
+                                           "new happened): prints one JSON result, exit code 0 done, 2 pending, "
+                                           "3 paused, 4 login needed, 5 busy, 1 error. Dry run unless --apply")
+    now.add_argument("--apply", action="store_true", help="Permit Intervals writes (and step the timed syncs back)")
+    now.add_argument("--scope", choices=["all", "activities", "wellness"], help="default: all")
+    now.add_argument("--mode", choices=["enrich", "upload"], help="default: BRIDGE_MODE")
+    now.add_argument("--activity", metavar="ID_OR_LINK", help="one Intervals activity (i12345678 or its link)")
+    now.add_argument("--garmin-id", help="one activity by its Garmin id")
+    now.add_argument("--day", metavar="YYYY-MM-DD", help="wellness of this one day")
+    now.add_argument("--wait-new", action="store_true",
+                     help="Look again (BRIDGE_ONDEMAND_RETRIES times, BRIDGE_ONDEMAND_RETRY_SECONDS "
+                          "apart) while nothing new is there; exit code 2 if it never comes")
+    now.add_argument("--force", action="store_true", help="Do not return a result of the last minute again")
     watch = sub.add_parser("watch", help="One cheap poll of Intervals; enrich only what appeared "
                                          "since the last poll, and read last night's wellness once the "
                                          "watch has synced (dry run unless --apply)")
@@ -244,10 +259,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-ACTIVITY_SCAN_MINUTES = 120     # run loop, enrich mode: the poll catches new activities in between
-TICK_SECONDS = 60               # run loop: how often it asks whether a poll is due
-PART_BUSY_RETRY = 300           # run loop: a full run that left out a part a backfill works on comes back this soon
-BUSY_WAIT_SECONDS = 300         # backfill: how long it waits for its part while a regular run finishes
+# run loop, enrich mode: the poll catches new activities in between
+ACTIVITY_SCAN_MINUTES = tuning.default("BRIDGE_ACTIVITY_SCAN_MINUTES")
+TICK_SECONDS = tuning.default("BRIDGE_TICK_SECONDS")   # run loop: how often it asks whether a poll is due
+# run loop: a full run that left out a part a backfill works on comes back this soon
+PART_BUSY_RETRY = tuning.default("BRIDGE_PART_BUSY_RETRY_SECONDS")
+# backfill: how long it waits for its part while a regular run finishes
 
 
 def _take_part(data_dir: Path, part: str, locks: ExitStack, log: logging.Logger, *, wait: float = 0) -> None:
@@ -313,8 +330,9 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
     log = logging.getLogger("bridge")
     intervals = IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
     garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
-    next_sync, next_health, count, failures = 0.0, time.time() + 300, 0, 0
-    tick = min(TICK_SECONDS, poll_seconds)
+    next_sync, count, failures = 0.0, 0, 0
+    next_health = time.time() + _t("BRIDGE_HEALTH_FIRST_SECONDS")
+    tick = min(_t("BRIDGE_TICK_SECONDS"), poll_seconds)
     # only a web page in this process can wake the loop ("Check now"); one elsewhere waits for the tick
     waker = polling.POLL_NOW if getattr(settings, "ui_port", None) else None
     polling.ACTIVE.update(fast=poll_seconds, mode=mode)
@@ -329,13 +347,15 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
     while iterations is None or count < iterations:
         count += 1
         now = time.time()
+        # an on-demand sync (`sync-now`) just brought everything up to date: the full run steps back
+        next_sync = max(next_sync, polling.sync_holdoff_until(store))
         cycle = ExitStack()                             # the parts this cycle holds, given back before the pause
         try:
             free = _free_parts(settings.data_dir, cycle, busy, log)
             if intervals_paused(store):
                 pass                                    # Intervals asked for a break (429): nothing at all
             elif now >= next_sync and not free:
-                next_sync = now + PART_BUSY_RETRY       # a backfill on both parts: look again soon
+                next_sync = now + _t("BRIDGE_PART_BUSY_RETRY_SECONDS")       # a backfill on both parts: look again soon
             elif now >= next_sync:
                 garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
                 if hasattr(intervals, "forget_custom_items"):
@@ -352,7 +372,8 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                         results["gear"] = gear_result
                 else:
                     results["activities"] = sync_enrich(settings, garmin, intervals, store, apply=apply,
-                                                        scan_interval_minutes=ACTIVITY_SCAN_MINUTES, catch_up=True)
+                                                        scan_interval_minutes=_t("BRIDGE_ACTIVITY_SCAN_MINUTES"),
+                                                        catch_up=True)
                     if not results["activities"].get("scan_skipped"):
                         gear_result = _gear_recent(settings, store, intervals, apply=apply)
                         if gear_result:
@@ -376,7 +397,8 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 log.info("Full run: %d activities seen, %d %s; wellness %d days checked, %d written; "
                          "%d Garmin requests", a.get("seen", 0), done, label, w.get("days_checked", 0),
                          w.get("writes", 0), garmin.requests)
-                next_sync, failures = now + (sync_minutes * 60 if len(free) == 2 else PART_BUSY_RETRY), 0
+                wait = sync_minutes * 60 if len(free) == 2 else _t("BRIDGE_PART_BUSY_RETRY_SECONDS")
+                next_sync, failures = now + wait, 0
             elif not polling.due(settings, store, now, poll_seconds, mode)[0]:
                 pass                                    # quiet hours, or not yet: the full runs go on
             elif mode == "upload":
@@ -412,29 +434,31 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
                 for finding in report.get("findings", []):
                     (log.warning if finding.get("alert") else log.info)("Health: %s - %s", finding.get("what"),
                                                                         finding.get("detail"))
-                next_health = now + 86400
+                next_health = now + _t("BRIDGE_HEALTH_HOURS") * 3600
         except KeyboardInterrupt:
             log.info("Stopped")
             return 0
         except GarminBlocked as exc:
             on_page = isinstance(exc, GarminLoginNeeded) and getattr(settings, "ui_port", None)
-            log.warning("%s%s; pausing for 15 minutes", exc, ", or sign in on the web page" if on_page else "")
+            log.warning("%s%s; pausing for %d minutes", exc, ", or sign in on the web page" if on_page else "",
+                        round(_t("BRIDGE_BLOCK_PAUSE_SECONDS") / 60))
             if isinstance(exc, GarminLoginNeeded):
                 notices.login_needed(settings, store, intervals, datetime.now(settings.timezone).date(), apply=apply)
-            next_sync = max(next_sync, time.time() + 900)
+            next_sync = max(next_sync, time.time() + _t("BRIDGE_BLOCK_PAUSE_SECONDS"))
             if iterations is None and wait_after_block(exc):
                 next_sync = 0                               # signed in on the web page: go on now
             continue
         except Exception as exc:
             if pause_on_rate_limit(store, exc):
-                next_sync = max(next_sync, time.time() + RATE_LIMIT_PAUSE_SECONDS)
+                next_sync = max(next_sync, time.time() + _t("BRIDGE_RATE_LIMIT_PAUSE_SECONDS"))
             elif exc.__class__.__module__.startswith("requests"):
                 log.error("HTTP/API request failed: %s", request_error(exc))
             else:
                 log.error("%s: %s", type(exc).__name__, exc)
             if now >= next_sync:             # the full run failed: again after a growing break, not each tick
                 failures += 1
-                next_sync = max(next_sync, time.time() + min(sync_minutes * 60, 300 * 2 ** (failures - 1)))
+                retry = min(sync_minutes * 60, _t("BRIDGE_FAILURE_BACKOFF_SECONDS") * 2 ** (failures - 1))
+                next_sync = max(next_sync, time.time() + retry)
         finally:
             cycle.close()                    # a backfill may take a part during the pause
         if iterations is None or count < iterations:
@@ -455,7 +479,7 @@ def run_backup_loop(settings: Settings, store: Store, *, every_minutes: int, ite
     log.info("garmin-intervals-bridge %s running (backup mode): your Garmin data into %s every %d min",
              __version__, settings.data_dir, every_minutes)
     log.info("Day boundary: %s (%s)", settings.timezone.key, getattr(settings, "timezone_source", "BRIDGE_TIMEZONE"))
-    next_health, count = time.time() + 300, 0
+    next_health, count = time.time() + _t("BRIDGE_HEALTH_FIRST_SECONDS"), 0
     while iterations is None or count < iterations:
         count += 1
         garmin = GarminSource(settings.token_dir, settings.garmin_request_delay)
@@ -471,13 +495,14 @@ def run_backup_loop(settings: Settings, store: Store, *, every_minutes: int, ite
                 for finding in probe(settings, garmin, None, store).get("findings", []):
                     (log.warning if finding.get("alert") else log.info)("Health: %s - %s", finding.get("what"),
                                                                         finding.get("detail"))
-                next_health = time.time() + 86400
+                next_health = time.time() + _t("BRIDGE_HEALTH_HOURS") * 3600
         except KeyboardInterrupt:
             log.info("Stopped")
             return 0
         except GarminBlocked as exc:
             on_page = isinstance(exc, GarminLoginNeeded) and getattr(settings, "ui_port", None)
-            log.warning("%s%s; pausing for 15 minutes", exc, ", or sign in on the web page" if on_page else "")
+            log.warning("%s%s; pausing for %d minutes", exc, ", or sign in on the web page" if on_page else "",
+                        round(_t("BRIDGE_BLOCK_PAUSE_SECONDS") / 60))
             if isinstance(exc, GarminLoginNeeded):
                 notices.login_needed(settings, store, None, datetime.now(settings.timezone).date(), apply=False)
             if iterations is None:
@@ -491,7 +516,6 @@ def run_backup_loop(settings: Settings, store: Store, *, every_minutes: int, ite
 
 
 PAUSE_KEY = polling.PAUSE_KEY
-RATE_LIMIT_PAUSE_SECONDS = 900
 
 
 def intervals_paused(store: Store) -> float:
@@ -504,16 +528,18 @@ def pause_on_rate_limit(store: Store, exc: BaseException) -> float | None:
     asked = rate_limited(exc)
     if asked is None:
         return None
-    pause = max(asked, RATE_LIMIT_PAUSE_SECONDS)
+    pause = max(asked, _t("BRIDGE_RATE_LIMIT_PAUSE_SECONDS"))
     store.set_meta(PAUSE_KEY, f"{time.time() + pause:.0f}")
     logging.getLogger("bridge").warning("Intervals.icu asks to slow down (HTTP 429): pausing for %d minutes",
                                         round(pause / 60))
     return pause
 
 
-def wait_after_block(exc: GarminBlocked, seconds: float = 900) -> bool:
-    """15 minutes of quiet after a block; True when a sign-in on the web page ended it early.
-    A rate limit (429) always waits the full time."""
+def wait_after_block(exc: GarminBlocked, seconds: float | None = None) -> bool:
+    """Quiet after a block (BRIDGE_BLOCK_PAUSE_SECONDS, 15 minutes); True when a sign-in on the web
+    page ended it early. A rate limit (429) always waits the full time."""
+    if seconds is None:
+        seconds = _t("BRIDGE_BLOCK_PAUSE_SECONDS")
     if not isinstance(exc, GarminLoginNeeded):
         time.sleep(seconds)
         return False
@@ -628,6 +654,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "autostart":
             return _autostart(args, settings)
         settings.ensure_data_dir()
+        if args.cmd == "sync-now":
+            from . import ondemand
+            return ondemand.run(args, settings)
         if args.cmd == "ui":
             return webui.serve(host=args.host, port=args.port, open_browser=not args.no_browser)
         if args.cmd == "notify-test":
@@ -672,7 +701,7 @@ def main(argv: list[str] | None = None) -> int:
         for lock_scope in lock_scopes:
             try:
                 _take_part(settings.data_dir, lock_scope, locks, log,
-                           wait=BUSY_WAIT_SECONDS if args.cmd == "backfill" else 0)
+                           wait=_t("BRIDGE_BUSY_WAIT_SECONDS") if args.cmd == "backfill" else 0)
                 held.append(lock_scope)
             except InstanceBusy as exc:
                 if args.cmd not in ("watch", "sync"):
@@ -847,7 +876,8 @@ def main(argv: list[str] | None = None) -> int:
                     # a Garmin poll (upload mode) costs three requests, an Intervals poll one small one
                     # Intervals asked for no minute polling: every 5 minutes by default
                     poll = args.poll_seconds or settings.poll_seconds or (600 if mode == "upload" else 300)
-                    every = args.sync_minutes or (settings.backup_hours * 60 if mode == "backup" else 30)
+                    every = args.sync_minutes or (
+                        settings.backup_hours * 60 if mode == "backup" else _t("BRIDGE_SYNC_MINUTES"))
                     if poll < (300 if mode == "upload" else 30) or every < 5:
                         raise ValueError("--poll-seconds too small for this mode, or --sync-minutes < 5")
                     if settings.ui_port:

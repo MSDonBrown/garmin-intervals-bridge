@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from . import tuning
+
 
 def _timezone() -> tuple[ZoneInfo, str]:
     """BRIDGE_TIMEZONE, else this computer's own zone (TZ, /etc/localtime, Windows' setting), else UTC.
@@ -277,6 +279,7 @@ class Settings:
         load_env_file(settings_file)
         if settings_file is None:
             load_options_file()
+        tuning.validate()                # a typo in a timer setting stops the start, not a run hours later
         base = settings_file.parent.resolve() if settings_file is not None else Path.cwd()
         data_dir = _path("BRIDGE_DATA_DIR", "data", base)
         token_dir = _path("GARMIN_TOKEN_DIR", str(data_dir / "tokens"), base)

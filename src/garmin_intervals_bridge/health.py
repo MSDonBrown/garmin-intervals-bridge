@@ -31,18 +31,20 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import alerts, notices
+from . import alerts, notices, tuning
 from .autostart import platform
 from .config import within_hours
 from .mapping import map_wellness
 
+_t = tuning.get
+
 log = logging.getLogger(__name__)
 
-STALE_RUN_HOURS = 3
-ENDPOINT_ERROR_DAYS = 3
-DROPOUT_BASELINE_DAYS = 7
-DROPOUT_MIN_BASELINE = 5
-DROPOUT_MISSING_DAYS = 2
+STALE_RUN_HOURS = tuning.default("BRIDGE_HEALTH_STALE_RUN_HOURS")
+ENDPOINT_ERROR_DAYS = tuning.default("BRIDGE_HEALTH_ENDPOINT_ERROR_DAYS")
+DROPOUT_BASELINE_DAYS = tuning.default("BRIDGE_HEALTH_DROPOUT_BASELINE_DAYS")
+DROPOUT_MIN_BASELINE = tuning.default("BRIDGE_HEALTH_DROPOUT_MIN_BASELINE")
+DROPOUT_MISSING_DAYS = tuning.default("BRIDGE_HEALTH_DROPOUT_MISSING_DAYS")
 # Raw sources that exist only when the athlete logs something (scale, food and drink log) or
 # starts it (Health Snapshot): their absence is no dropout.
 USER_LOGGED = ("body_composition", "nutrition", "hydration", "health_snapshots")
@@ -106,10 +108,10 @@ def _watch_stale_hours(settings: Any, now: float) -> float | None:
     """How long without a look counts as "not running": at least STALE_RUN_HOURS, twice the
     slowest planned pace; None while no look is expected (quiet hours without a quiet pace,
     or too soon after they ended)."""
-    from .polling import QUIET_DEFAULT
+    adaptive = getattr(settings, "poll_mode", "fixed") == "adaptive"
     slowest = max(getattr(settings, "poll_seconds", None) or 300, getattr(settings, "poll_quiet_seconds", None) or 0,
-                  QUIET_DEFAULT if getattr(settings, "poll_mode", "fixed") == "adaptive" else 0)
-    hours = max(STALE_RUN_HOURS, 2 * slowest / 3600)
+                  _t("BRIDGE_POLL_QUIET_DEFAULT_SECONDS") if adaptive else 0)
+    hours = max(_t("BRIDGE_HEALTH_STALE_RUN_HOURS"), 2 * slowest / 3600)
     ranges = getattr(settings, "poll_hours", ())
     if ranges and getattr(settings, "poll_quiet_seconds", None) is None:
         tz = getattr(settings, "timezone", None)
@@ -119,7 +121,7 @@ def _watch_stale_hours(settings: Any, now: float) -> float | None:
     return hours
 
 
-FULL_RUN_MINUTES = 30            # `run`'s full runs (and the systemd timer's)
+FULL_RUN_MINUTES = tuning.default("BRIDGE_SYNC_MINUTES")   # `run`'s full runs (and the systemd timer's)
 
 
 def liveness(settings: Any, store: Any, *, now: float | None = None) -> tuple[bool, str]:
@@ -138,7 +140,7 @@ def liveness(settings: Any, store: Any, *, now: float | None = None) -> tuple[bo
     last = runs["backup"] if backup_mode else max((t for t in (runs["sync"], runs["watch"]) if t), default=None)
     if last is None:
         return True, "no run finished yet"
-    limit = 2 * (getattr(settings, "backup_hours", 12) * 3600 if backup_mode else FULL_RUN_MINUTES * 60) + 300
+    limit = 2 * (getattr(settings, "backup_hours", 12) * 3600 if backup_mode else _t("BRIDGE_SYNC_MINUTES") * 60) + 300
     age = now - last
     if age > limit:
         return False, f"no run for {age / 60:.0f} minutes (expected within {limit / 60:.0f})"
@@ -156,7 +158,7 @@ def silent_error_checks(settings: Any, store: Any, *, now: float | None = None) 
     watch_hours = _watch_stale_hours(settings, now)
     expected = ((("backup", "backup", 2 * every + 1),) if backup_mode else
                 ((("watch", "watch for new activities", watch_hours),) if watch_hours else ())
-                + (("sync", "30-minute sync", STALE_RUN_HOURS),))
+                + (("sync", "30-minute sync", _t("BRIDGE_HEALTH_STALE_RUN_HOURS")),))
     for command, label, hours in expected:
         runs = store.recent_runs(hours, command)
         if not runs and store.recent_runs(24 * 14, command):      # ran before, not any more
@@ -175,7 +177,11 @@ def silent_error_checks(settings: Any, store: Any, *, now: float | None = None) 
 
     # 3) Garmin wellness endpoints erroring day after day; fields that silently stopped
     raw_dir = os.path.join(str(settings.data_dir), "raw")
-    days = sorted(glob.glob(os.path.join(raw_dir, "2*.json")))[-DROPOUT_BASELINE_DAYS - DROPOUT_MISSING_DAYS - 1:]
+    min_baseline = _t("BRIDGE_HEALTH_DROPOUT_MIN_BASELINE")
+    baseline_days = _t("BRIDGE_HEALTH_DROPOUT_BASELINE_DAYS")
+    missing_days = _t("BRIDGE_HEALTH_DROPOUT_MISSING_DAYS")
+    error_days = _t("BRIDGE_HEALTH_ENDPOINT_ERROR_DAYS")
+    days = sorted(glob.glob(os.path.join(raw_dir, "2*.json")))[-baseline_days - missing_days - 1:]
     snapshots = []
     for path in days:
         try:
@@ -183,17 +189,17 @@ def silent_error_checks(settings: Any, store: Any, *, now: float | None = None) 
                 snapshots.append(json.load(fh))
         except (OSError, ValueError):
             continue
-    if len(snapshots) >= ENDPOINT_ERROR_DAYS:
-        recent = snapshots[-ENDPOINT_ERROR_DAYS:]
+    if len(snapshots) >= error_days:
+        recent = snapshots[-error_days:]
         for key in sorted({k for s in recent for k in (s.get("errors") or {})}):
             if all(key in (s.get("errors") or {}) for s in recent):
                 findings.append({"alert": True, "what": f"Garmin endpoint '{key}' failing",
-                                 "detail": f"error on each of the last {ENDPOINT_ERROR_DAYS} archived days: "
+                                 "detail": f"error on each of the last {error_days} archived days: "
                                            f"{recent[-1]['errors'][key]}"})
     today = datetime.fromtimestamp(now, settings.timezone).date()
     # today's file holds only what has been read so far (the night, before the scale and the evening)
-    finished = [s for s in snapshots if s["date"] < today.isoformat()][-DROPOUT_BASELINE_DAYS - DROPOUT_MISSING_DAYS:]
-    if len(finished) > DROPOUT_MISSING_DAYS:
+    finished = [s for s in snapshots if s["date"] < today.isoformat()][-baseline_days - missing_days:]
+    if len(finished) > missing_days:
         profile = getattr(settings, "wellness_profile", "recommended")
 
         def fields_of(snapshot: dict) -> set[str]:
@@ -202,18 +208,18 @@ def silent_error_checks(settings: Any, store: Any, *, now: float | None = None) 
             native, custom = map_wellness({**snapshot, "data": data}, day, today, profile)
             return set(native) | set(custom)
 
-        baseline, latest = finished[:-DROPOUT_MISSING_DAYS], finished[-DROPOUT_MISSING_DAYS:]
+        baseline, latest = finished[:-missing_days], finished[-missing_days:]
         counts: dict[str, int] = {}
         for s in baseline:
             for f in fields_of(s):
                 counts[f] = counts.get(f, 0) + 1
         present_lately = set().union(*(fields_of(s) for s in latest))
         dropped = sorted(f for f, c in counts.items()
-                         if c >= min(DROPOUT_MIN_BASELINE, len(baseline)) and f not in present_lately)
+                         if c >= min(min_baseline, len(baseline)) and f not in present_lately)
         if dropped:
             findings.append({"alert": True, "what": f"{len(dropped)} wellness fields stopped arriving from Garmin",
                              "detail": f"present on most of the previous {len(baseline)} days, absent on the last "
-                                       f"{DROPOUT_MISSING_DAYS}: {', '.join(dropped)}"})
+                                       f"{missing_days}: {', '.join(dropped)}"})
 
     # 4) Informational: what the last day of runs did (no alert)
     day_runs = store.recent_runs(24)

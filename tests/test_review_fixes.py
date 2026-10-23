@@ -105,7 +105,7 @@ def test_watch_skips_the_poll_when_the_lock_is_held(tmp_path, monkeypatch):
     checked, polled = [], []
     monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: checked.append(1) or {})
     monkeypatch.setattr(cli, "watch_once", lambda *a, **k: polled.append(1) or {})
-    monkeypatch.setattr(cli, "BUSY_WAIT_SECONDS", 0)                  # a backfill waits for a run; not here
+    monkeypatch.setenv("BRIDGE_BUSY_WAIT_SECONDS", "0")                # a backfill waits for a run; not here
     with single_instance(tmp_path, ("activities",)):
         assert main(["watch"]) == 0                        # poll skipped, no error exit, no alert
         assert polled == [] and checked == [1]             # the free wellness scope still does its check

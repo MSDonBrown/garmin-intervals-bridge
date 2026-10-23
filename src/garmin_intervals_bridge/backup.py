@@ -25,17 +25,23 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from . import tuning
 from .garmin import GarminBlocked
+
+_t = tuning.get
 
 log = logging.getLogger(__name__)
 
-FINAL_HOUR = 12               # a day counts as final at noon of the next day (the watch synced)
-LATE_READ_DAYS = 3            # read once more this many days after the day: late syncs
-RECENT_ACTIVITY_DAYS = 3
-RECENT_WELLNESS_DAYS = 7
-ACCOUNT_EVERY_DAYS = 7
+# a day counts as final at noon of the next day (the watch synced)
+FINAL_HOUR = tuning.default("BRIDGE_BACKUP_FINAL_HOUR")
+# read once more this many days after the day: late syncs
+LATE_READ_DAYS = tuning.default("BRIDGE_BACKUP_LATE_READ_DAYS")
+RECENT_ACTIVITY_DAYS = tuning.default("BRIDGE_BACKUP_RECENT_ACTIVITY_DAYS")
+RECENT_WELLNESS_DAYS = tuning.default("BRIDGE_BACKUP_RECENT_WELLNESS_DAYS")
+ACCOUNT_EVERY_DAYS = tuning.default("BRIDGE_BACKUP_ACCOUNT_DAYS")
 READS_KEY = "backup:reads:"   # + day: "<final reads>@<time of the last one>"
-FINAL_TRIES = 3               # a read with passing endpoint failures counts after this many tries
+# a read with passing endpoint failures counts after this many tries
+FINAL_TRIES = tuning.default("BRIDGE_FINAL_TRIES")
 ACCOUNT_KEY = "backup:account"
 
 
@@ -43,8 +49,8 @@ def _due(day: date, now: datetime, reads: int, last_read: float | None = None) -
     """The first final read at noon of the next day, the second LATE_READ_DAYS later – unless the
     first one already came that late (a fresh setup reads the last days once, and that is final)."""
     first = datetime.combine(day + timedelta(days=1), datetime.min.time(), tzinfo=now.tzinfo).replace(
-        hour=FINAL_HOUR)
-    second = first + timedelta(days=LATE_READ_DAYS - 1)
+        hour=_t("BRIDGE_BACKUP_FINAL_HOUR"))
+    second = first + timedelta(days=_t("BRIDGE_BACKUP_LATE_READ_DAYS") - 1)
     if reads == 0:
         return now >= first
     return reads == 1 and now >= second and (last_read is None or last_read < second.timestamp())
@@ -102,7 +108,7 @@ def _files(day: date, garmin: Any, store: Any, metrics: dict) -> None:
 def _account(garmin: Any, store: Any, today: date, metrics: dict, *, history_start: date | None = None,
              force: bool = False) -> None:
     taken = store.meta_updated(ACCOUNT_KEY)
-    if not force and taken is not None and time.time() - taken < ACCOUNT_EVERY_DAYS * 86400:
+    if not force and taken is not None and time.time() - taken < _t("BRIDGE_BACKUP_ACCOUNT_DAYS") * 86400:
         return
     store.save_account_snapshot(garmin.account_snapshot(history_start=history_start, today=today))
     store.set_meta(ACCOUNT_KEY)
@@ -119,8 +125,8 @@ def backup_once(settings: Any, garmin: Any, store: Any, *, now: datetime | None 
     now = now or datetime.now(settings.timezone)
     today = now.date()
     metrics = new_metrics()
-    _activities(garmin, store, today - timedelta(days=RECENT_ACTIVITY_DAYS), today, metrics)
-    for offset in range(RECENT_WELLNESS_DAYS, 0, -1):
+    _activities(garmin, store, today - timedelta(days=_t("BRIDGE_BACKUP_RECENT_ACTIVITY_DAYS")), today, metrics)
+    for offset in range(_t("BRIDGE_BACKUP_RECENT_WELLNESS_DAYS"), 0, -1):
         day = today - timedelta(days=offset)
         key = READS_KEY + day.isoformat()
         count, _, when = (store.get_meta(key) or "0").partition("@")
@@ -139,7 +145,7 @@ def backup_once(settings: Any, garmin: Any, store: Any, *, now: datetime | None 
             continue
         tries_key = f"{key}:tries"
         tries = int(store.get_meta(tries_key) or 0) + 1
-        if passing and tries < FINAL_TRIES:             # what failed this time comes with the next run
+        if passing and tries < _t("BRIDGE_FINAL_TRIES"):             # what failed this time comes with the next run
             store.set_meta(tries_key, str(tries))
             metrics["failed"] += 1
             log.info("Backup of wellness %s: %s failed this time; next run reads again", day, ", ".join(passing))

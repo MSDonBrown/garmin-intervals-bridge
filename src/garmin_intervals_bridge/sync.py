@@ -8,7 +8,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from . import hrvtrend, imready4
+from . import hrvtrend, imready4, tuning
 from .config import Settings
 from .enrich import enrich_activity, load_field_mappings
 from .fit import sha256, validate_fit, wellness_bundle_index
@@ -18,6 +18,8 @@ from .intervals import rate_limited, refused
 from .mapping import PROVISIONAL_CODES, map_wellness, merge_wellness, snapshot_corrections
 from .store import InstanceBusy, Store
 from .times import external_id_names, parse_utc
+
+_t = tuning.get
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +67,8 @@ def _garmin_day(garmin: dict) -> date:
     return ts.date()
 
 
-ARCHIVE_SETTLE_DAYS = 2     # Garmin attaches weather and gear to a fresh activity a little after the upload
+# Garmin attaches weather and gear to a fresh activity a little after the upload
+ARCHIVE_SETTLE_DAYS = tuning.default("BRIDGE_ARCHIVE_SETTLE_DAYS")
 
 
 def _archived_extras(store: Store, gid: str) -> dict | None:
@@ -102,7 +105,7 @@ def archive_activity(gid: str, activity: dict, garmin: Any, store: Store, *, now
         found = garmin.activity_extras(activity, keys=None if old is None else missing)
         started = _time(activity.get("startTimeGMT"), garmin_gmt=True)
         current = now or datetime.now(timezone.utc)
-        fresh = started is not None and current - started < timedelta(days=ARCHIVE_SETTLE_DAYS)
+        fresh = started is not None and current - started < timedelta(days=_t("BRIDGE_ARCHIVE_SETTLE_DAYS"))
         if found.get("errors") and fresh:
             log.info("Extras of %s not complete yet (%s); asking again next run",
                      gid, ", ".join(sorted(found["errors"])))
@@ -113,7 +116,8 @@ def archive_activity(gid: str, activity: dict, garmin: Any, store: Store, *, now
     return "archived"
 
 
-INTAKE_SETTLE_HOURS = 12      # drinks and gear are logged after the ride: Garmin is asked again once, later
+# drinks and gear are logged after the ride: Garmin is asked again once, later
+INTAKE_SETTLE_HOURS = tuning.default("BRIDGE_INTAKE_SETTLE_HOURS")
 
 
 def complete_intake(gid: str, activity: dict, intervals_id: str | None, garmin: Any, intervals: Any, store: Store,
@@ -131,12 +135,12 @@ def complete_intake(gid: str, activity: dict, intervals_id: str | None, garmin: 
         return
     started = _time(activity.get("startTimeGMT"), garmin_gmt=True)
     current = now or datetime.now(timezone.utc)
-    settled = started is not None and current - started >= timedelta(hours=INTAKE_SETTLE_HOURS)
+    settled = started is not None and current - started >= timedelta(hours=_t("BRIDGE_INTAKE_SETTLE_HOURS"))
     if not settled:
         return
     path = store.activity_json_path(gid)
     summary = None
-    if path.is_file() and path.stat().st_mtime >= started.timestamp() + INTAKE_SETTLE_HOURS * 3600:
+    if path.is_file() and path.stat().st_mtime >= started.timestamp() + _t("BRIDGE_INTAKE_SETTLE_HOURS") * 3600:
         try:
             summary = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -145,7 +149,7 @@ def complete_intake(gid: str, activity: dict, intervals_id: str | None, garmin: 
         summary = garmin.activity(gid)
         store.save_activity_json(gid, summary)
     extras = store.activity_extras_path(gid)
-    if extras.is_file() and extras.stat().st_mtime < started.timestamp() + INTAKE_SETTLE_HOURS * 3600:
+    if extras.is_file() and extras.stat().st_mtime < started.timestamp() + _t("BRIDGE_INTAKE_SETTLE_HOURS") * 3600:
         _refresh_gear(gid, activity, garmin, store)
     values = intake_values(summary)
     written = write_intake(intervals_id, values, intervals, apply=apply)
@@ -373,13 +377,15 @@ def _sync_one_activity(activity: dict, gid: str, garmin: Any, intervals: Any, st
     log.info("Uploaded original FIT for Garmin ID %s", gid)
 
 
-CATCH_UP_DAYS = 14              # after a pause the scheduled runs look back to the last one, at most this far
+# after a pause the scheduled runs look back to the last one, at most this far
+CATCH_UP_DAYS = tuning.default("BRIDGE_CATCH_UP_DAYS")
 CATCH_UP_KEY = "catchup:"       # + scope: the first day a pause left to read, until a run has read it
 
 
 def _garmin_nights(store: Store, day: date) -> bool:
     """Whether Garmin delivers this person's nights: a morning read found sleep within the last week."""
-    return any(store.get_meta(f"wellness:morning:{day - timedelta(days=o)}") for o in range(1, GARMIN_NIGHT_DAYS + 1))
+    nights = _t("BRIDGE_GARMIN_NIGHT_DAYS")
+    return any(store.get_meta(f"wellness:morning:{day - timedelta(days=o)}") for o in range(1, nights + 1))
 
 
 def note_pause(settings: Settings, store: Store, today: date) -> None:
@@ -399,7 +405,7 @@ def note_pause(settings: Settings, store: Store, today: date) -> None:
         return
     store.set_meta(CATCH_UP_KEY + "from", f"{last:.0f}")
     for scope, base in (("activities", settings.activity_days), ("wellness", settings.wellness_days)):
-        start = max(last_day - timedelta(days=base - 1), today - timedelta(days=CATCH_UP_DAYS - 1))
+        start = max(last_day - timedelta(days=base - 1), today - timedelta(days=_t("BRIDGE_CATCH_UP_DAYS") - 1))
         if start >= today - timedelta(days=base - 1):
             continue                                  # no pause: the usual window covers it
         saved = store.get_meta(CATCH_UP_KEY + scope)
@@ -414,7 +420,7 @@ def catch_up_days(store: Store, scope: str, base: int, today: date) -> int:
     saved = store.get_meta(CATCH_UP_KEY + scope)
     if not saved:
         return base
-    start = max(date.fromisoformat(saved), today - timedelta(days=max(base, CATCH_UP_DAYS) - 1))
+    start = max(date.fromisoformat(saved), today - timedelta(days=max(base, _t("BRIDGE_CATCH_UP_DAYS")) - 1))
     return max(base, (today - start).days + 1)
 
 
@@ -618,7 +624,7 @@ def sync_enrich(settings: Settings, garmin: Any, intervals: Any, store: Store, *
     return metrics
 
 
-RETRIES_BY_ID = 3               # per full run: failed activities that left the scan window
+RETRIES_BY_ID = tuning.default("BRIDGE_RETRIES_BY_ID")   # per full run: failed activities that left the scan window
 
 
 def _retry_overdue(garmin: Any, intervals: Any, store: Store, metrics: dict, listed: set[str], mappings: Any, *,
@@ -628,7 +634,7 @@ def _retry_overdue(garmin: Any, intervals: Any, store: Store, metrics: dict, lis
     now = time.time()
     overdue = [f["garmin_id"] for f in store.failed_activities()
                if f["garmin_id"] not in listed and (not f["next_retry"] or f["next_retry"] <= now)]
-    for gid in overdue[:RETRIES_BY_ID]:
+    for gid in overdue[:_t("BRIDGE_RETRIES_BY_ID")]:
         try:
             result = enrich_activity(gid, garmin, intervals, store, apply=apply, mappings=mappings)
         except GarminBlocked:
@@ -805,7 +811,8 @@ def transient_errors(raw: dict) -> list[str]:
     return out
 
 
-FINAL_TRIES = 3                 # a day with passing endpoint failures is final after this many reads
+# a day with passing endpoint failures is final after this many reads
+FINAL_TRIES = tuning.default("BRIDGE_FINAL_TRIES")
 
 
 # ---- when Garmin is asked for a day's wellness ----
@@ -819,15 +826,19 @@ FINAL_TRIES = 3                 # a day with passing endpoint failures is final 
 MORNING_ENDPOINTS = ("sleep", "hrv", "training_readiness", "body_composition",
                      # Garmin's status metrics as of this morning (replaced at the final read)
                      "endurance_score", "hill_score", "max_metrics", "fitness_age", "race_predictions")
-CHECK_MINUTES = 10              # Intervals pre-check cadence; costs no Garmin request
-SIGNAL_DAYS = 2                 # official sleep seen this recently: wait for it instead of asking Garmin
-GARMIN_NIGHT_DAYS = 7           # no night from Garmin this long: the advice does not wait for one
+CHECK_MINUTES = tuning.default("BRIDGE_WELLNESS_CHECK_MINUTES")   # Intervals pre-check cadence; costs no Garmin request
+# official sleep seen this recently: wait for it instead of asking Garmin
+SIGNAL_DAYS = tuning.default("BRIDGE_WELLNESS_SIGNAL_DAYS")
+# no night from Garmin this long: the advice does not wait for one
+GARMIN_NIGHT_DAYS = tuning.default("BRIDGE_GARMIN_NIGHT_DAYS")
 FALLBACK_SLOTS = ((6, 30), (7, 30), (8, 30), (10, 0), (12, 0), (16, 0), (20, 0))
 LATE_SLOTS = ((12, 0), (16, 0), (20, 0))     # with a signal: in case it stays silent all day
 MORNING_BACKOFF_MINUTES = (30, 60, 120, 240)
-READINESS_RETRIES, READINESS_RETRY_MINUTES = 2, 30
+READINESS_RETRIES = tuning.default("BRIDGE_READINESS_RETRIES")
+READINESS_RETRY_MINUTES = tuning.default("BRIDGE_READINESS_RETRY_MINUTES")
 VERIFY_BACKOFF_MINUTES = (60, 120, 240)
-FINAL_ANYWAY_HOUR = 20          # a past day is read at 20:00 the day after, synced or not
+# a past day is read at 20:00 the day after, synced or not
+FINAL_ANYWAY_HOUR = tuning.default("BRIDGE_FINAL_ANYWAY_HOUR")
 
 
 def _positive(value: Any) -> bool:
@@ -924,7 +935,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
         caught_up(store, "wellness")                  # the days a pause left are read
     readiness_key = f"wellness:readiness:{current}"
     readiness_due = (morning == "no-readiness"
-                     and int(store.get_meta(f"{readiness_key}:tries") or 0) < READINESS_RETRIES
+                     and int(store.get_meta(f"{readiness_key}:tries") or 0) < _t("BRIDGE_READINESS_RETRIES")
                      and now_ts >= float(store.get_meta(readiness_key) or 0))
     files_due = [d for d in past if store.get_meta(f"wellness:final:{d}") and files_missing(store, d)
                  and now_ts >= float(store.get_meta(f"wellness:files:{d}") or 0)]
@@ -940,7 +951,8 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
             and not advice_due):
         return metrics
     last = float(store.get_meta("wellness:check") or 0)        # the time of the last check, as the caller has it
-    if throttle and not unwritten and not files_due and last and 0 <= now_ts - last < CHECK_MINUTES * 60 - 5:
+    check_seconds = _t("BRIDGE_WELLNESS_CHECK_MINUTES") * 60
+    if throttle and not unwritten and not files_due and last and 0 <= now_ts - last < check_seconds - 5:
         return metrics
     store.set_meta("wellness:check", f"{now_ts:.0f}")
 
@@ -993,7 +1005,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
     if official_sleep and not morning:
         store.set_meta("wellness:official_sleep", current.isoformat())
     seen = store.get_meta("wellness:official_sleep")
-    signal = bool(seen) and (current - date.fromisoformat(seen)).days <= SIGNAL_DAYS
+    signal = bool(seen) and (current - date.fromisoformat(seen)).days <= _t("BRIDGE_WELLNESS_SIGNAL_DAYS")
     synced = official_sleep          # the official integration had the night: the device synced after midnight
 
     morning_key = f"wellness:next:{current}"
@@ -1007,7 +1019,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
             night = {"hrv": ((data.get("hrv") or {}).get("hrvSummary") or {}).get("lastNightAvg"),
                      "restingHR": (data.get("sleep") or {}).get("restingHeartRate")}
             store.set_meta(night_key, json.dumps({k: v for k, v in night.items() if _positive(v)}))
-            store.set_meta(readiness_key, str(now_ts + READINESS_RETRY_MINUTES * 60))
+            store.set_meta(readiness_key, str(now_ts + _t("BRIDGE_READINESS_RETRY_MINUTES") * 60))
             metrics["morning"] = 1
             synced = True
             log.info("Morning values of %s read (%s)", current,
@@ -1022,7 +1034,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
             store.set_meta(f"wellness:morning:{current}", "ok")
             write(current, raw)
         else:
-            _backoff(store, readiness_key, (READINESS_RETRY_MINUTES,), now_ts)
+            _backoff(store, readiness_key, (_t("BRIDGE_READINESS_RETRY_MINUTES"),), now_ts)
 
     if morning:
         synced = True                    # Garmin has today's sleep: the device synced after midnight
@@ -1062,7 +1074,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
             _backoff(store, verify_key, VERIFY_BACKOFF_MINUTES, now_ts)
     for day in pending_past:
         anyway = now >= datetime.combine(day + timedelta(days=1), datetime.min.time(),
-                                         tzinfo=tz) + timedelta(hours=FINAL_ANYWAY_HOUR)
+                                         tzinfo=tz) + timedelta(hours=_t("BRIDGE_FINAL_ANYWAY_HOUR"))
         retry_key = f"wellness:retry:{day}"
         if not (synced or anyway) or now_ts < float(store.get_meta(retry_key) or 0):
             continue
@@ -1071,7 +1083,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
             _backoff(store, retry_key, VERIFY_BACKOFF_MINUTES, now_ts)
             log.warning("No Garmin wellness payload for %s; trying again later", day)
             continue
-        if raw["transient"] and int(store.get_meta(f"{retry_key}:tries") or 0) < FINAL_TRIES - 1:
+        if raw["transient"] and int(store.get_meta(f"{retry_key}:tries") or 0) < _t('BRIDGE_FINAL_TRIES') - 1:
             _backoff(store, retry_key, VERIFY_BACKOFF_MINUTES, now_ts)
             log.info("Final read of %s: %s failed this time; reading again later", day,
                      ", ".join(raw["transient"]))

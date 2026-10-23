@@ -173,6 +173,7 @@ run is exactly what `--apply` would send.
 | `compare-fit A B` | Same comparison for two local files (e.g. against a manual browser export). |
 | `enrich <id or link> [--apply]` | One activity again, compared with what Intervals holds now – after Intervals' *Reprocess file*, or a new custom field or stream. Works next to a running bridge; `--activity-id <garmin id>` instead names the Garmin side. |
 | `watch [--apply]` | Poll Intervals once (~450 bytes); enrich activities seen for the first time. |
+| `sync-now [--apply] [--wait-new] [--activity ID] [--day D] [--scope …]` | Sync right now, on request: [On-demand sync](#on-demand-sync). One JSON result, exit code for the caller. |
 | `sync [--scope all\|activities\|wellness] [--mode enrich\|upload] [--apply]` | Scheduled run over the last days. |
 | `backfill --scope wellness\|activities --from DATE [--to DATE] [--apply]` | Paced, resumable run over the past; with `--swap` the originals go into Garmin's copies (in place). |
 | `setup-fields [--apply]` | Create the private custom wellness fields the mapping uses. |
@@ -547,6 +548,38 @@ run all along (each missed wellness day once, about 15 Garmin requests). If a ru
 (Garmin limits it, the computer goes off), the next one carries on. Longer pauses: a
 `backfill`.
 
+### On-demand sync
+
+The timers (a look every 5 minutes, a full run every 30) are the bridge's own rhythm. When *you*
+– or an agent, a shortcut, a script – know something has happened (the ride is done, the watch
+has synced), ask for a sync right now:
+
+```
+docker exec garmin-intervals-bridge garmin-intervals-bridge sync-now --apply --wait-new
+docker exec garmin-intervals-bridge garmin-intervals-bridge sync-now --apply --activity i12345678
+docker exec garmin-intervals-bridge garmin-intervals-bridge sync-now --apply --scope wellness --day 2026-10-22
+```
+
+It goes to Garmin at once – whatever `BRIDGE_POLL_HOURS`, the activity-scan skip and the wellness
+refresh window say – and enriches what Intervals holds. Nothing listens on a port: the trigger is
+the command, so there is nothing new to protect. It prints one JSON result and exits with a code:
+
+| Exit | `status` | Meaning |
+| --- | --- | --- |
+| 0 | `done` | Finished (`new` counts what was enriched or written) |
+| 2 | `pending` | `--wait-new`: nothing new yet after `BRIDGE_ONDEMAND_RETRIES` looks – try again later |
+| 3 | `paused` | Garmin or Intervals.icu asked for a break; `retry_after_seconds` says how long |
+| 4 | `login_needed` | Sign in to Garmin again (`login`, or the web page) |
+| 5 | `busy` | A running sync did not let go of its part within `BRIDGE_ONDEMAND_LOCK_WAIT_SECONDS` |
+| 1 | `error` | Anything else; `message` says what |
+
+It uses the same per-part locks as the other commands, so it waits for a running cycle (or a
+backfill) instead of overlapping with it. Once it has written, the timed ones step back: the
+next full run of `run` waits `BRIDGE_ONDEMAND_SYNC_HOLDOFF_MINUTES`, and the polls pause for
+`BRIDGE_ONDEMAND_POLL_HOLDOFF_SECONDS`. A second call within `BRIDGE_ONDEMAND_MIN_GAP_SECONDS`
+returns the first result (`"coalesced": true`) without asking Garmin again; `--force`, or naming
+an activity or day, always asks. Without `--apply` it is a dry run and delays nothing.
+
 ### When the bridge needs you
 
 Garmin's session can end (a password change, a revoked device); then nothing syncs until
@@ -608,6 +641,91 @@ win. Relative paths in a settings file count from its folder.
 | `BRIDGE_SWAP_HOURS` | `48` | `upload` only: only copies imported this recently are swapped automatically |
 | `BRIDGE_OPTIONS_FILE` | `/data/options.json` | A Home Assistant app's form, read when there is no settings file (its keys: `home-assistant/config.yaml`) |
 | `BRIDGE_INTERVALS_NOTES` | `true` | When Garmin's session ends and a new `login` is needed, a bridge running with `--apply` puts one note in your Intervals calendar (once per episode, never deleted by the bridge); `false` turns it off |
+
+### Timers and thresholds
+
+Every timer and threshold is a setting. The default is what the bridge always did; an empty value
+means the default; a value outside its range (or no number) stops the bridge at start and names the
+variable. Changes apply at the next start.
+
+**On-demand sync (`sync-now`)**
+
+| Variable | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `BRIDGE_ONDEMAND_SYNC_HOLDOFF_MINUTES` | `30` | 0–1440 minutes | After an on-demand sync the next full run of `run` waits at least this long (0 = no hold-off) |
+| `BRIDGE_ONDEMAND_POLL_HOLDOFF_SECONDS` | `900` | 0–86400 seconds | After an on-demand sync the regular polls for new activities pause this long ("Check now" still works) |
+| `BRIDGE_ONDEMAND_MIN_GAP_SECONDS` | `60` | 0–3600 seconds | A `sync-now` without a named activity or day, this soon after the last one, returns its result |
+| `BRIDGE_ONDEMAND_LOCK_WAIT_SECONDS` | `600` | 0–7200 seconds | How long `sync-now` waits for a running sync (a cycle of `run`, a timer, a backfill) to let go of its part |
+| `BRIDGE_ONDEMAND_MAX_SECONDS` | `900` | 60–7200 seconds | Longest a whole `sync-now` may take, waiting and retrying included (then it reports and stops) |
+| `BRIDGE_ONDEMAND_RETRIES` | `5` | 0–50 tries | `sync-now --wait-new`: how often to look again when nothing new is there yet (the watch may still be syncing) |
+| `BRIDGE_ONDEMAND_RETRY_SECONDS` | `120` | 10–3600 seconds | `sync-now --wait-new`: pause between those looks |
+| `BRIDGE_ONDEMAND_ACTIVITY_DAYS` | `2` | 1–30 days | `sync-now` looks this many days back for activities (today included) |
+| `BRIDGE_ONDEMAND_WELLNESS_DAYS` | `2` | 1–30 days | `sync-now` reads wellness for this many days (today included), ignoring the refresh window |
+
+**The run loop (`run`)**
+
+| Variable | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `BRIDGE_SYNC_MINUTES` | `30` | 5–1440 minutes | Minutes between the full runs (`--sync-minutes` wins; backup mode uses `BRIDGE_BACKUP_HOURS`) |
+| `BRIDGE_ACTIVITY_SCAN_MINUTES` | `120` | 0–1440 minutes | Enrich mode: the full run skips its Garmin activity scan while the last one is younger (0 = never skip) |
+| `BRIDGE_TICK_SECONDS` | `60` | 5–3600 seconds | How often the loop asks whether a poll or a full run is due |
+| `BRIDGE_PART_BUSY_RETRY_SECONDS` | `300` | 30–3600 seconds | A full run that left a part out because a backfill works on it comes back this soon |
+| `BRIDGE_BUSY_WAIT_SECONDS` | `300` | 0–86400 seconds | A backfill waits this long for a running sync to finish with its part |
+| `BRIDGE_RATE_LIMIT_PAUSE_SECONDS` | `900` | 60–86400 seconds | Least pause after Intervals.icu answers 429 (longer if it asks for longer) |
+| `BRIDGE_BLOCK_PAUSE_SECONDS` | `900` | 60–86400 seconds | Pause after Garmin blocks, rate-limits or wants a sign-in |
+| `BRIDGE_FAILURE_BACKOFF_SECONDS` | `300` | 30–3600 seconds | A failed full run is tried again after this, doubling with each failure up to the full-run interval |
+| `BRIDGE_HEALTH_HOURS` | `24` | 1–168 hours | Hours between the health probes written to the log |
+| `BRIDGE_HEALTH_FIRST_SECONDS` | `300` | 0–86400 seconds | The first health probe comes this long after the start |
+
+**Polling (`watch`, adaptive mode)**
+
+| Variable | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `BRIDGE_HOT_MINUTES` | `60` | 0–1440 minutes | After a new activity: poll at the fast pace this long, a second one may follow |
+| `BRIDGE_ASK_GAP_SECONDS` | `30` | 0–3600 seconds | "Check now" right after a look waits this long (no button hammering) |
+| `BRIDGE_POLL_SLACK_SECONDS` | `15` | 0–300 seconds | A look this much earlier than its time still counts as due |
+| `BRIDGE_POLL_QUIET_DEFAULT_SECONDS` | `1800` | 60–86400 seconds | Adaptive mode, unusual hours, without `BRIDGE_POLL_QUIET_SECONDS`: the pace |
+| `BRIDGE_ADAPTIVE_LEARN_DAYS` | `84` | 7–365 days | Adaptive mode learns your usual activity hours from this many days |
+| `BRIDGE_ADAPTIVE_HALF_LIFE_DAYS` | `28` | 1–365 days | ... the weight of an activity halves with this many days of age |
+| `BRIDGE_ADAPTIVE_MIN_ACTIVITIES` | `15` | 1–1000 activities | ... and it needs this many before it trusts what it learned (until then: the fast pace) |
+| `BRIDGE_ADAPTIVE_FAST_SHARE` | `0.8` | 0.05–1.0 share | ... the hours that hold this share of your activity ends get the fast pace |
+| `BRIDGE_ADAPTIVE_MIDDLE_SHARE` | `0.97` | 0.05–1.0 share | ... up to this share the middle pace (must be above the fast share); the rest the quiet pace |
+
+**Activities and wellness**
+
+| Variable | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `BRIDGE_ARCHIVE_SETTLE_DAYS` | `2` | 0–30 days | Garmin attaches weather and gear to a fresh activity a little later: asked again within this many days |
+| `BRIDGE_INTAKE_SETTLE_HOURS` | `12` | 0–168 hours | Drinks and gear are logged after the ride: Garmin is asked for them again once, this long after the start |
+| `BRIDGE_CATCH_UP_DAYS` | `14` | 1–90 days | After a pause the scheduled runs look back to the last run, at most this far |
+| `BRIDGE_RETRIES_BY_ID` | `3` | 0–50 activities | Per full run: failed activities that left the scan window and are retried by id |
+| `BRIDGE_FINAL_TRIES` | `3` | 1–10 tries | A day with passing endpoint failures counts as final after this many reads (wellness and backup) |
+| `BRIDGE_WELLNESS_CHECK_MINUTES` | `10` | 1–1440 minutes | The wellness pre-check of Intervals (costs no Garmin request) at most this often |
+| `BRIDGE_WELLNESS_SIGNAL_DAYS` | `2` | 0–30 days | Official sleep seen this recently: wait for it instead of asking Garmin |
+| `BRIDGE_GARMIN_NIGHT_DAYS` | `7` | 1–60 days | No night from Garmin for this long: the advice does not wait for one |
+| `BRIDGE_FINAL_ANYWAY_HOUR` | `20` | 0–23 hour | A past day is read at this hour the day after, synced or not |
+| `BRIDGE_READINESS_RETRIES` | `2` | 0–10 tries | Training readiness: tries when Garmin has not computed it yet |
+| `BRIDGE_READINESS_RETRY_MINUTES` | `30` | 1–1440 minutes | Training readiness: minutes between those tries |
+
+**Health checks**
+
+| Variable | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `BRIDGE_HEALTH_STALE_RUN_HOURS` | `3` | 1–168 hours | No look or full run for this long (at least) counts as "not running" |
+| `BRIDGE_HEALTH_ENDPOINT_ERROR_DAYS` | `3` | 1–30 days | A Garmin endpoint with an error on each of the last this many days is reported |
+| `BRIDGE_HEALTH_DROPOUT_BASELINE_DAYS` | `7` | 3–60 days | Dropout check: the days a field must have been there before |
+| `BRIDGE_HEALTH_DROPOUT_MIN_BASELINE` | `5` | 1–60 days | Dropout check: in at least this many of those |
+| `BRIDGE_HEALTH_DROPOUT_MISSING_DAYS` | `2` | 1–14 days | Dropout check: missing on each of the latest this many days is reported |
+
+**Backup mode**
+
+| Variable | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `BRIDGE_BACKUP_FINAL_HOUR` | `12` | 0–23 hour | A day counts as final at this hour of the next day (the watch has synced) |
+| `BRIDGE_BACKUP_LATE_READ_DAYS` | `3` | 1–14 days | A day is read once more this many days after it, for a watch that synced late |
+| `BRIDGE_BACKUP_RECENT_ACTIVITY_DAYS` | `3` | 1–30 days | Each backup run looks for new activities this many days back |
+| `BRIDGE_BACKUP_RECENT_WELLNESS_DAYS` | `7` | 1–30 days | Each backup run considers the wellness of this many past days |
+| `BRIDGE_BACKUP_ACCOUNT_DAYS` | `7` | 1–90 days | The account data (profile, devices, zones ...) is archived this often |
 
 Two more are set by the images themselves: `BRIDGE_IN_CONTAINER` (the container image: no
 autostart, web page on all interfaces) and `BRIDGE_UI_INGRESS` (the Home Assistant app:

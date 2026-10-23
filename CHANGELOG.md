@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`sync-now`:** a sync on request, for a person or an agent that knows something has happened
+  (README: *On-demand sync*). Goes to Garmin at once, prints one JSON result, exit code 0 done / 2
+  pending / 3 paused / 4 login needed / 5 busy / 1 error. `--wait-new` looks again while nothing is
+  there yet; `--activity`, `--day` and `--scope` narrow it. Same locks as the other commands; after
+  it wrote, the timed full runs and polls step back for a while.
+- **Every timer and threshold is a setting** (`BRIDGE_*`, README: *Timers and thresholds*, listed
+  in `.env.example`), each with the value the bridge always used. A bad value stops the start and
+  names the variable.
+
 ## 0.11.7 — 2026-10-23
 
 The past from the web page (no terminal needed, e.g. in Home Assistant); a short Intervals outage is no
