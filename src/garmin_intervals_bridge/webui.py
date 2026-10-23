@@ -26,12 +26,13 @@ import logging
 import os
 import re
 import secrets
+import subprocess
 import sys
 import threading
 import time
 import webbrowser
 from collections import deque
-from datetime import datetime
+from datetime import date, datetime
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -242,6 +243,7 @@ class UI:
         self.failures = 0
         self.login_gate = threading.Lock()          # one password check at a time: guessing stays slow
         self._update: tuple[float, str | None] = (0.0, None)
+        self.backfill: dict | None = None            # the past, started from the page: its process and what it does
 
     @property
     def local(self) -> bool:
@@ -802,6 +804,7 @@ class UI:
         advice_form = self.form(session, "/actions/advice", "", "Show today's advice")
         one_form = self.form(session, "/actions/enrich", '<label>Intervals activity: its link or id (i12345678) '
                              '<input type="text" name="activity" required></label>', "Show what it gets")
+        past = self._backfill_section(session)
         return self.page(session, "Actions", f'{message}'
                          '<section><h2>Gear</h2><p>Puts the bike or shoes Garmin recorded on the Intervals activities '
                          f'the bridge has archived. You see the plan first; nothing is written before you confirm.</p>'
@@ -812,7 +815,108 @@ class UI:
                          f'(read only).</p>{advice_form}</section>'
                          '<section><h2>One activity again</h2><p>Puts Garmin\'s values back into one activity – after '
                          'Intervals\' "Reprocess file", which drops them, or after you added a custom field or stream. '
-                         f'You see what it gets first.</p>{one_form}</section>')
+                         f'You see what it gets first.</p>{one_form}</section>{past}')
+
+    # -- the past: a backfill in the background --
+
+    def _backfill_running(self) -> dict | None:
+        job = self.backfill
+        if job is not None and job.get("exit") is None:
+            job["exit"] = job["proc"].poll()
+        return job
+
+    def _backfill_section(self, session: Session) -> str:
+        job = self._backfill_running()
+        what = ("Fills in what Garmin's own sync left out on earlier days – Garmin's values on the activities (or, "
+                "with swap, the original file into each of them) or the wellness days. It runs in the background, "
+                "paced for Garmin, next to the running bridge; the <a href=\"/log\">Log</a> shows how far it got. "
+                "You see what it will do first.")
+        if job is not None and job["exit"] is None:
+            return (f'<section><h2>The past</h2><p class="warn"><b>Running:</b> {esc(job["label"])}, started '
+                    f'{esc(_ago(job["started"]))}. The <a href="/log">Log</a> shows how far it got.</p></section>')
+        done = ""
+        if job is not None:
+            ok = job["exit"] == 0
+            ended = "finished" if ok else f"exit code {job['exit']}"
+            done = (f'<p class="{"ok" if ok else "bad"}"><b>{"Done" if ok else "Stopped"}:</b> {esc(job["label"])} '
+                    f'({ended}; details in the <a href="/log">Log</a>).</p>')
+        today = date.today().isoformat()
+        form = self.form(session, "/actions/backfill", (
+            '<label>What <select name="scope"><option value="activities">Activities</option>'
+            '<option value="wellness">Wellness</option></select></label>'
+            f'<label>From <input type="date" name="start" required max="{today}"></label>'
+            f'<label>To <input type="date" name="end" value="{today}" max="{today}"></label>'
+            '<label><input type="checkbox" name="swap" value="1"> Activities: swap – the original file into Garmin\'s '
+            'copy (same activity, nothing deleted), so Intervals computes everything itself</label>'),
+            "Show what it will do")
+        return f'<section><h2>The past</h2>{done}<p>{what}</p>{form}</section>'
+
+    def _backfill_request(self, form: dict) -> tuple[dict | None, str]:
+        """The request from the form, checked; (None, why) when it does not make sense."""
+        scope = form.get("scope", "")
+        if scope not in ("activities", "wellness"):
+            return None, "Choose activities or wellness."
+        try:
+            start = date.fromisoformat(form.get("start", ""))
+            end = date.fromisoformat(form.get("end") or date.today().isoformat())
+        except ValueError:
+            return None, "Dates as YYYY-MM-DD, please."
+        if start > end:
+            return None, "From must not be after To."
+        if end > date.today():
+            return None, "To must not be in the future."
+        if start < date(2006, 1, 1):
+            return None, "Garmin Connect has nothing before 2006."
+        swap = scope == "activities" and form.get("swap") == "1" and self.settings().mode != "upload"
+        return {"scope": scope, "start": start, "end": end, "swap": swap}, ""
+
+    def backfill_post(self, session: Session, query: dict, form: dict) -> str:
+        request, why = self._backfill_request(form)
+        if request is None:
+            return self.actions_page(session, f'<p class="warn">{esc(why)}</p>')
+        days = (request["end"] - request["start"]).days + 1
+        if request["scope"] == "wellness":
+            plan = (f"Wellness for {days} days ({request['start']} to {request['end']}): about 15 Garmin requests "
+                    f"per day, two seconds apart – roughly {max(1, round(days * 10 / 60))} minutes. Days the bridge "
+                    "has read before are skipped; only empty fields are filled.")
+        else:
+            plan = (f"Activities from {request['start']} to {request['end']}: one download of the original per "
+                    "activity that is not archived yet, two seconds apart. "
+                    + ("Each original goes into Garmin's copy in Intervals (swap, in place): same activity, nothing "
+                       "deleted; edited intervals stay." if request["swap"] else
+                       "Garmin's values go into the empty fields of Garmin's copies; nothing else is changed."))
+        hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v)}">' for k, v in
+                         (("scope", request["scope"]), ("start", request["start"]), ("end", request["end"]),
+                          ("swap", "1" if request["swap"] else "")))
+        start = self.form(session, "/actions/backfill-start", hidden, "Start it – writes to Intervals")
+        return self.page(session, "The past", f'<section><p>{esc(plan)}</p><p class="muted">It runs in the '
+                         f'background, next to the running bridge; you can close this page.</p>{start}</section>')
+
+    def backfill_start(self, session: Session, query: dict, form: dict) -> str:
+        request, why = self._backfill_request(form)
+        if request is None:
+            return self.actions_page(session, f'<p class="warn">{esc(why)}</p>')
+        with self.lock:                                # one from the page at a time
+            job = self._backfill_running()
+            if job is not None and job["exit"] is None:
+                return self.actions_page(session, '<p class="warn">A backfill from this page is still running.</p>')
+            cmd = [sys.executable, "-m", "garmin_intervals_bridge", "backfill", "--scope", request["scope"],
+                   "--from", request["start"].isoformat(), "--to", request["end"].isoformat(), "--apply"]
+            if request["scope"] == "activities" and self.settings().mode == "upload":
+                cmd += ["--mode", "upload"]
+            if request["swap"]:
+                cmd.append("--swap")
+            label = (f"{request['scope']} {request['start']} to {request['end']}"
+                     + (" with swap" if request["swap"] else ""))
+            try:
+                proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                        **({} if os.name == "nt" else {"start_new_session": True}))
+            except OSError as exc:
+                log.error("The backfill did not start: %s", exc)
+                return self.actions_page(session, f'<p class="bad">The backfill did not start: {esc(exc)}</p>')
+            self.backfill = {"proc": proc, "label": label, "started": time.time(), "exit": None}
+        log.info("Backfill started from the web page: %s", label)
+        return self.actions_page(session, f'<p class="ok"><b>Started:</b> {esc(label)}.</p>')
 
     def _intervals(self, settings: Settings) -> Any:
         return self.intervals_client(settings.intervals_api_key, settings.intervals_athlete_id)
@@ -986,7 +1090,8 @@ POST_PAGES = {"/garmin": "garmin_post", "/garmin/mfa": "garmin_mfa", "/settings"
               "/settings/test": "alert_test",
               "/restart": "restart_post", "/actions/gear": "gear_post", "/actions/gear-apply": "gear_apply",
               "/actions/charts": "charts_post", "/actions/advice": "advice_post", "/actions/enrich": "enrich_post",
-              "/actions/enrich-apply": "enrich_apply", "/poll-now": "poll_now"}
+              "/actions/enrich-apply": "enrich_apply", "/poll-now": "poll_now",
+              "/actions/backfill": "backfill_post", "/actions/backfill-start": "backfill_start"}
 
 
 def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:

@@ -503,7 +503,9 @@ every 5 minutes and `... sync --apply` every 30 minutes instead.
 what it did last, the Garmin sign-in (MFA included – the way to renew an expired session
 without a terminal), the settings (the API key can be replaced, never shown), when it looks
 for new activities with a *Check now* button, the gear and chart plans with a button to carry
-them out, today's training advice, the log. It
+them out, the past (*Actions → The past*: a backfill of activities or wellness for a date range, optionally
+with swap, started in the background – no terminal needed, which matters in Home Assistant), today's training
+advice, the log. It
 listens on 127.0.0.1 only, and the link it opens carries a random key, so neither other
 users of the computer nor web pages in your browser can use it.
 

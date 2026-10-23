@@ -4,6 +4,12 @@
 
 ### Added
 
+- **The past from the web page:** *Actions → The past* fills in activities or wellness for a date
+  range – Garmin's values into the empty fields, or with swap the original file into Garmin's copy
+  – as a `backfill` in the background, next to the running bridge. You see what it will do
+  first; the Log shows how far it got. In Home Assistant, which has no terminal, this was not
+  possible before (thanks Sveen in the forum for the nudge).
+
 - **The web page for the systemd setup:** `deploy/systemd/garmin-intervals-bridge-ui.service`
   serves it to your network with `BRIDGE_UI_PASSWORD` (no random key that nobody sees), hardened
   like the other units; `deploy/README.md` says how. The read-only settings and the log page

@@ -519,3 +519,52 @@ def test_the_shipped_ui_unit_asks_for_the_password_and_listens_for_the_network()
     assert "ui --host 0.0.0.0" in unit and "--no-browser" in unit and "BRIDGE_UI_PASSWORD" in unit
     assert "User=gib" in unit and "ReadWritePaths=/var/lib/garmin-intervals-bridge" in unit
     assert "Restart=on-abnormal" in unit                                    # no restart loop without a password
+
+
+# ---- the past: a backfill started from the page (Home Assistant has no terminal) ----
+
+class FakeProcess:
+    started: list = []
+
+    def __init__(self, cmd, **kwargs):
+        self.cmd, self.code = cmd, None
+        FakeProcess.started.append(self)
+
+    def poll(self):
+        return self.code
+
+
+def test_the_past_shows_the_plan_first_and_starts_one_backfill_in_the_background(page, monkeypatch):
+    FakeProcess.started = []
+    monkeypatch.setattr(webui.subprocess, "Popen", FakeProcess)
+    cookie = signed_in(page)
+    text = call(page, "GET", "/actions", cookie=cookie)[2]
+    assert "The past" in text and 'name="start"' in text and "Show what it will do" in text
+    token = csrf(text)
+    plan = call(page, "POST", "/actions/backfill", {"csrf": token, "scope": "wellness", "start": "2026-01-01",
+                                                   "end": "2026-01-10"}, cookie=cookie)[2]
+    assert "Wellness for 10 days" in plan and "Start it" in plan and FakeProcess.started == []   # nothing yet
+    form = {"csrf": token, "scope": "activities", "start": "2026-09-01", "end": "2026-10-01", "swap": "1"}
+    text = call(page, "POST", "/actions/backfill-start", form, cookie=cookie)[2]
+    assert "Started" in text and "Running" in text and len(FakeProcess.started) == 1
+    cmd = FakeProcess.started[0].cmd
+    assert cmd[1:4] == ["-m", "garmin_intervals_bridge", "backfill"] and "--apply" in cmd and "--swap" in cmd
+    assert cmd[cmd.index("--from") + 1] == "2026-09-01" and cmd[cmd.index("--scope") + 1] == "activities"
+    again = call(page, "POST", "/actions/backfill-start", form, cookie=cookie)[2]
+    assert "still running" in again and len(FakeProcess.started) == 1                # one at a time
+    FakeProcess.started[0].code = 0
+    assert "Done" in call(page, "GET", "/actions", cookie=cookie)[2]
+
+
+def test_the_past_refuses_what_makes_no_sense(page, monkeypatch):
+    FakeProcess.started = []
+    monkeypatch.setattr(webui.subprocess, "Popen", FakeProcess)
+    cookie = signed_in(page)
+    token = csrf(call(page, "GET", "/actions", cookie=cookie)[2])
+    for form, why in (({"scope": "wellness", "start": "2026-10-10", "end": "2026-10-01"}, "must not be after"),
+                      ({"scope": "wellness", "start": "2099-01-01", "end": "2099-01-02"}, "future"),
+                      ({"scope": "everything", "start": "2026-01-01"}, "Choose activities or wellness"),
+                      ({"scope": "wellness", "start": "yesterday"}, "YYYY-MM-DD")):
+        text = call(page, "POST", "/actions/backfill-start", {"csrf": token, **form}, cookie=cookie)[2]
+        assert why in text
+    assert FakeProcess.started == []
