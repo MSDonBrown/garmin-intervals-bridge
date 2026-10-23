@@ -4,7 +4,7 @@
 
 **Garmin filters the FIT files it sends to Intervals.icu. This puts the data back — and syncs a lot more.**
 
-**Set up in five minutes:** [Windows](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/WINDOWS.md) · [Mac](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/MAC.md) · [Synology](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/SYNOLOGY.md) · [Unraid](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/UNRAID.md) · [Home Assistant](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/HOME_ASSISTANT.md) · [Linux & Docker](https://github.com/futureweb/garmin-intervals-bridge#running-it)
+**Set up in five minutes:** [Windows](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/WINDOWS.md) · [Mac](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/MAC.md) · [Synology](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/SYNOLOGY.md) · [Unraid](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/UNRAID.md) · [Linux & Docker](https://github.com/futureweb/garmin-intervals-bridge#running-it)
 
 - **Your Garmin metrics back** on every activity — Stamina, Recovery Time, VO₂max, Performance
   Condition, Training Effect, Sweat Loss … from the original file, nothing duplicated, training
@@ -181,7 +181,7 @@ run is exactly what `--apply` would send.
 | `gear [--prefer intervals\|evidence\|garmin] [--map G=I] [--create] [--apply]` | Put Garmin's gear (bikes, shoes, skis …) on the Intervals activities, from the archive; see [Gear](#gear). |
 | `imready4 [--date D \| --from D [--to D]] [--compare] [--apply] [--overwrite]` | ImReady4-compatible training advice into `TrainingAdvice`: preview, comparison with existing values, filling the past; see [Training advice](#training-advice-imready4). |
 | `hrvtrend [--date D \| --from D [--to D]] [--compare] [--apply] [--overwrite]` | Experimental trend advice into its own field `HRVTrendAdvice`, compared with ImReady4's; see [docs/HRV_TREND.md](docs/HRV_TREND.md). |
-| `run [--apply] [--mode …] [--poll-seconds N] [--sync-minutes N]` | Keep running in one process: a poll every 5 minutes (see [How often it looks](#how-often-it-looks)), a full run every 30 minutes, the daily health check (what autostart, the containers and the Home Assistant app start). See [Running it](#running-it). |
+| `run [--apply] [--mode …] [--poll-seconds N] [--sync-minutes N]` | Keep running in one process: a poll every 5 minutes (see [How often it looks](#how-often-it-looks)), a full run every 30 minutes, the daily health check (what autostart and the containers start). See [Running it](#running-it). |
 | `status [--check]` | Pending uploads and failed activities with their retry time. `--check`: exit 1 when the bridge has stopped working – no run for twice the expected time (the container image's healthcheck). |
 | `reset-pending --activity-id <garmin id>` | Upload mode: clear a pending upload after you checked Intervals by hand. |
 | `snapshot-account [--history-from DATE]` | Archive what is not a time series: profile, settings, devices, zones, gear, records, badges, workouts, plans, the calendar. |
@@ -451,10 +451,6 @@ outcome stays `pending` until you check. Systemd users swap the watch timer
 for `deploy/systemd/garmin-intervals-bridge-upload.timer` (10 minutes) and
 keep the 30-minute unit for wellness.
 
-**Home Assistant:** an app (add-on) – settings in a form, the web page with the Garmin
-sign-in in the sidebar through ingress, no terminal: add this repository in Home Assistant's
-app store, see [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
-
 **Docker / Podman:** a ready-made image is on the GitHub Container Registry,
 `ghcr.io/futureweb/garmin-intervals-bridge`, and on Docker Hub,
 `futurewebat/garmin-intervals-bridge` (for NAS boxes whose container manager
@@ -505,7 +501,7 @@ what it did last, the Garmin sign-in (MFA included – the way to renew an expir
 without a terminal), the settings (the API key can be replaced, never shown), when it looks
 for new activities with a *Check now* button, the gear and chart plans with a button to carry
 them out, the past (*Actions → The past*: a backfill of activities or wellness for a date range, optionally
-with swap, started in the background – no terminal needed, which matters in Home Assistant), today's training
+with swap, started in the background – no terminal needed), today's training
 advice, the log. It
 listens on 127.0.0.1 only, and the link it opens carries a random key, so neither other
 users of the computer nor web pages in your browser can use it.
@@ -639,7 +635,6 @@ win. Relative paths in a settings file count from its folder.
 | `BRIDGE_SWAP` | `false` | `true`: the original of each new activity instead of Garmin's filtered copy (see [Modes](#modes)) |
 | `BRIDGE_SWAP_METHOD` | `replace` | `replace`: the original into the same activity, nothing deleted; `upload`: a new activity of your own, Garmin's copy deleted |
 | `BRIDGE_SWAP_HOURS` | `48` | `upload` only: only copies imported this recently are swapped automatically |
-| `BRIDGE_OPTIONS_FILE` | `/data/options.json` | A Home Assistant app's form, read when there is no settings file (its keys: `home-assistant/config.yaml`) |
 | `BRIDGE_INTERVALS_NOTES` | `true` | When Garmin's session ends and a new `login` is needed, a bridge running with `--apply` puts one note in your Intervals calendar (once per episode, never deleted by the bridge); `false` turns it off |
 
 ### Timers and thresholds
@@ -727,9 +722,8 @@ variable. Changes apply at the next start.
 | `BRIDGE_BACKUP_RECENT_WELLNESS_DAYS` | `7` | 1–30 days | Each backup run considers the wellness of this many past days |
 | `BRIDGE_BACKUP_ACCOUNT_DAYS` | `7` | 1–90 days | The account data (profile, devices, zones ...) is archived this often |
 
-Two more are set by the images themselves: `BRIDGE_IN_CONTAINER` (the container image: no
-autostart, web page on all interfaces) and `BRIDGE_UI_INGRESS` (the Home Assistant app:
-the page answers only Home Assistant's ingress).
+`BRIDGE_IN_CONTAINER` is set by the container image itself (no autostart, web page on all
+interfaces).
 
 ## Known limitations
 

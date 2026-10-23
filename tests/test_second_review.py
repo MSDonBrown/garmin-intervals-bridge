@@ -404,12 +404,11 @@ def test_status_check_exits_1_when_the_bridge_stopped(tmp_path, monkeypatch, cap
 
 
 def test_the_healthcheck_comes_with_the_templates_never_with_the_image():
-    # Home Assistant's Supervisor keeps an app whose image has any healthcheck entry in "Starting"
-    # until a health result arrives – with `HEALTHCHECK NONE` forever (DarKen, 0.11.1)
+    # the healthcheck belongs to the templates (compose, Unraid), which set `status --check`
     from pathlib import Path
     root = Path(__file__).parents[1]
-    for dockerfile in (root / "Dockerfile", root / "home-assistant" / "Dockerfile"):
-        assert not any(line.strip().startswith("HEALTHCHECK") for line in dockerfile.read_text().splitlines())
+    assert not any(line.strip().startswith("HEALTHCHECK")
+                   for line in (root / "Dockerfile").read_text().splitlines())
     check = '"garmin-intervals-bridge", "status", "--check"'
     assert check in (root / "compose.yaml").read_text() and check in (root / "docs" / "SYNOLOGY.md").read_text()
     assert '--health-cmd "garmin-intervals-bridge status --check"' in (

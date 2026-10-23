@@ -7,9 +7,6 @@ Three ways to open it:
                                  pages in your browser cannot use the page without it)
   `run` with BRIDGE_UI_PORT      next to the running bridge, e.g. in a container on a NAS:
                                  needs BRIDGE_UI_PASSWORD (8 characters or more)
-  Home Assistant app             through Home Assistant's ingress (BRIDGE_UI_INGRESS=1): only
-                                 its proxy (172.30.32.2) is let in, its users are signed in
-                                 already, and every link lives under its X-Ingress-Path
 
 Safety: every form carries a per-session token and must come from this page (CSRF); a
 page on 127.0.0.1 answers only to its own host name (DNS rebinding); no caching, no
@@ -24,7 +21,6 @@ import hmac
 import html
 import logging
 import os
-import re
 import secrets
 import subprocess
 import sys
@@ -69,8 +65,6 @@ MAX_BODY = 64 * 1024
 MAX_CONNECTIONS = 16                       # requests served at once; more wait in the kernel's queue
 REQUEST_SECONDS = 20                       # a request (headers and body) that takes longer is dropped
 PLACEHOLDER = "change-me-please"           # what the templates ship with; never accepted
-INGRESS_IP = "172.30.32.2"                 # Home Assistant's ingress proxy: the only client then
-INGRESS_PATH = re.compile(r"/api/hassio_ingress/[A-Za-z0-9_-]{1,200}")
 LOG_LINES = 300
 HEADERS = {
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
@@ -82,10 +76,6 @@ HEADERS = {
     "Referrer-Policy": "same-origin",
     "Cache-Control": "no-store",
 }
-# Home Assistant shows an ingress page in a frame of its own (same origin): that one frame is allowed
-INGRESS_HEADERS = {**HEADERS, "X-Frame-Options": "SAMEORIGIN",
-                   "Content-Security-Policy": HEADERS["Content-Security-Policy"].replace(
-                       "frame-ancestors 'none'", "frame-ancestors 'self'")}
 STYLE = """
 :root{--bg:#f4f6f9;--fg:#1d2330;--card:#fff;--line:#e1e5eb;--field:#c9cfd8;--code:#f0f2f5;--accent:#1f6feb;
 --accent-fg:#fff;--ok:#17803d;--warn:#a35c00;--bad:#b42318;--muted:#667085;--head:#1d2330;color-scheme:light dark}
@@ -138,10 +128,8 @@ GARMIN_WAIT = 2.0                          # a quick Garmin answer is shown at o
 GARMIN_REFRESH = 2                         # seconds between the waiting page's reloads (a meta refresh: no script)
 
 
-def settings_source(ingress: bool) -> str:
+def settings_source() -> str:
     """Where settings come from when there is no settings file to edit here."""
-    if ingress:
-        return "the app's <i>Configuration</i> tab in Home Assistant"
     if autostart.platform() == "container":
         return "the container's settings (its environment variables)"
     if os.getenv("INVOCATION_ID"):                  # a systemd service: its EnvironmentFile
@@ -228,13 +216,12 @@ class Reply(Exception):
 
 class UI:
     def __init__(self, *, host: str, port: int, password: str | None = None, key: str | None = None,
-                 in_run: bool = False, ingress: bool = False, settings: Callable[[], Settings] = Settings.from_env,
+                 in_run: bool = False, settings: Callable[[], Settings] = Settings.from_env,
                  intervals_client: Callable[..., Any] = IntervalsClient,
                  garmin_source: Callable[..., Any] = GarminSource,
                  newer_release: Callable[[], str | None] = notices.newer_release,
                  restart: Callable[[Path], Any] | None = None):
         self.host, self.port, self.password, self.key, self.in_run = host, port, password, key, in_run
-        self.ingress = ingress
         self.settings, self.intervals_client, self.garmin_source = settings, intervals_client, garmin_source
         self.newer_release = newer_release
         self.restart = restart or (lambda env: autostart.install(env))
@@ -277,8 +264,6 @@ class UI:
         return session
 
     def _how_to_update(self) -> str:
-        if self.ingress:
-            return "Update the app in Home Assistant (<i>Settings → Apps</i>)."
         if autostart.platform() == "container":
             return "Pull the new image and recreate the container."
         cmd = command_name()
@@ -452,7 +437,7 @@ class UI:
 
     def garmin_page(self, session: Session, message: str = "", mfa: bool = False) -> str:
         warning = ""
-        if not self.local and not self.ingress:
+        if not self.local:
             warning = ('<p class="warn">This page travels unencrypted (http) unless you reach it through '
                        'HTTPS, e.g. your NAS\'s reverse proxy. Sign in from your home network only.</p>')
         if mfa:
@@ -589,7 +574,7 @@ class UI:
                     ("New activities", self._schedule(settings)),
                     ("Alerts", ", ".join(alerts.channels(settings)) or "none (BRIDGE_ALERT_EMAIL, BRIDGE_NTFY_URL)")]
             table = "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in rows)
-            where = settings_source(self.ingress)
+            where = settings_source()
             return self.page(session, "Settings", f'{message}<section><p>These come from {where}; change them '
                              f'there.</p><table>{table}</table></section>{self._test_form(session, settings)}')
 
@@ -1109,22 +1094,15 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             self._handle("POST")
 
-        prefix = ""                                 # Home Assistant's ingress path, for every link
-
         @property
         def secure(self) -> str:
             """Behind an HTTPS reverse proxy the session cookie travels over HTTPS only."""
             return "; Secure" if (self.headers.get("X-Forwarded-Proto") or "").lower() == "https" else ""
 
         def _send(self, status: int, body: str = "", headers: dict | None = None) -> None:
-            if self.prefix:                         # our own markup only: user text is escaped (&quot;)
-                body = body.replace('href="/', f'href="{self.prefix}/').replace('action="/', f'action="{self.prefix}/')
-                if headers and headers.get("Location", "").startswith("/"):
-                    headers = {**headers, "Location": self.prefix + headers["Location"]}
             data = body.encode("utf-8")
             self.send_response(status)
-            base = INGRESS_HEADERS if ui.ingress else HEADERS
-            for name, value in {**base, "Content-Type": "text/html; charset=utf-8", **(headers or {})}.items():
+            for name, value in {**HEADERS, "Content-Type": "text/html; charset=utf-8", **(headers or {})}.items():
                 self.send_header(name, value)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -1143,11 +1121,6 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
         def _route(self, method: str) -> str:
             url = urlsplit(self.path)
             path, query = url.path, {k: v[0] for k, v in parse_qs(url.query).items()}
-            if ui.ingress:
-                if self.client_address[0] != INGRESS_IP:
-                    raise Reply(403, "Only through Home Assistant")
-                given = self.headers.get("X-Ingress-Path", "")
-                self.prefix = given if INGRESS_PATH.fullmatch(given) else ""
             if ui.local:
                 allowed = {f"{h}:{ui.port}" for h in ("127.0.0.1", "localhost", "[::1]")}
                 if self.headers.get("Host", "") not in allowed:
@@ -1163,9 +1136,8 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
                 raw = self.rfile.read(length).decode("utf-8", errors="replace")
                 form = {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
                 origin = self.headers.get("Origin")
-                # behind ingress the browser talks to Home Assistant, not to us: the token decides;
                 # "null" says nothing (a privacy setting) – the session's token and cookie still must fit
-                if origin and origin != "null" and not ui.ingress and \
+                if origin and origin != "null" and \
                         urlsplit(origin).netloc != self.headers.get("Host", ""):
                     raise Reply(403, "Foreign form")
             session = ui.session(self.headers.get("Cookie"))
@@ -1196,11 +1168,8 @@ def handler_for(ui: UI) -> type[BaseHTTPRequestHandler]:
             return getattr(ui, name)(session, query, form)
 
         def _without_session(self, method: str, path: str, query: dict, form: dict) -> str:
-            cookie = ("{0}={1}; Path=" + (self.prefix or "/") + "; HttpOnly; SameSite=Strict; Max-Age="
+            cookie = ("{0}={1}; Path=" + "/" + "; HttpOnly; SameSite=Strict; Max-Age="
                       + str(SESSION_SECONDS) + self.secure)
-            if ui.ingress:                          # Home Assistant signed the user in already
-                session = ui.new_session()
-                raise Reply(303, "", {"Location": path, "Set-Cookie": cookie.format(COOKIE, session.id)})
             if ui.key is not None:
                 if hmac.compare_digest(query.get("key", ""), ui.key):
                     session = ui.new_session()
@@ -1305,16 +1274,12 @@ def serve(*, host: str = "127.0.0.1", port: int = DEFAULT_PORT, open_browser: bo
 
 
 def start_in_background(port: int, host: str) -> ThreadingHTTPServer:
-    """Next to `run` (a container on a NAS): a password, never a key in a log. In a Home Assistant
-    app: its ingress instead, nothing else let in."""
-    ingress = os.getenv("BRIDGE_UI_INGRESS", "").strip().lower() in ("1", "true", "yes")
-    password = None if ingress else (os.getenv("BRIDGE_UI_PASSWORD") or None)
-    if not ingress:
-        check(host, password, in_run=True)
-    ui = UI(host=host, port=port, password=password, in_run=True, ingress=ingress)
+    """Next to `run` (a container on a NAS): a password, never a key in a log."""
+    password = os.getenv("BRIDGE_UI_PASSWORD") or None
+    check(host, password, in_run=True)
+    ui = UI(host=host, port=port, password=password, in_run=True)
     server = make_server(ui)
     threading.Thread(target=server.serve_forever, name="web-page", daemon=True).start()
-    log.info("Web page on port %d (%s)", ui.port,
-             "through Home Assistant's ingress only" if ingress else "sign in with BRIDGE_UI_PASSWORD")
+    log.info("Web page on port %d (sign in with BRIDGE_UI_PASSWORD)", ui.port)
     return server
 

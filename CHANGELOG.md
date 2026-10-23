@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Removed
+
+- **The Home Assistant app:** `home-assistant/`, `repository.yaml`, `docs/HOME_ASSISTANT.md`, the
+  settings-form loader (`BRIDGE_OPTIONS_FILE`, `/data/options.json`) and the web page's ingress mode
+  (`BRIDGE_UI_INGRESS`). Docker, Unraid, Synology and systemd are unchanged.
+
 ### Added
 
 - **`sync-now`:** a sync on request, for a person or an agent that knows something has happened

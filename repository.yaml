@@ -1,5 +1,0 @@
-# Home Assistant app repository: add https://github.com/futureweb/garmin-intervals-bridge
-# under Settings -> Apps -> App store -> ⋮ -> Repositories. The app is in home-assistant/.
-name: Garmin Intervals Bridge
-url: https://github.com/futureweb/garmin-intervals-bridge
-maintainer: Futureweb (https://github.com/futureweb)

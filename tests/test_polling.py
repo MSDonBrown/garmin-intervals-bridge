@@ -186,8 +186,6 @@ def test_poll_settings(monkeypatch):
     monkeypatch.setenv("BRIDGE_POLL_MODE", "sometimes")
     with pytest.raises(ValueError, match="BRIDGE_POLL_MODE"):
         config.Settings.from_env()
-    assert config.OPTIONS["poll_mode"] == "BRIDGE_POLL_MODE"
-    assert config.OPTIONS["poll_quiet_seconds"] == "BRIDGE_POLL_QUIET_SECONDS"
 
 
 def test_a_watch_that_is_not_due_ends_without_a_request(tmp_path, monkeypatch, capsys):

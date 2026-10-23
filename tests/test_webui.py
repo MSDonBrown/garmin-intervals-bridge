@@ -280,17 +280,6 @@ def test_password_mode_for_a_page_on_the_network(env, monkeypatch):
         server.server_close()
 
 
-def test_home_assistant_options_file(tmp_path, monkeypatch):
-    options = tmp_path / "options.json"
-    options.write_text(json.dumps({"intervals_api_key": "from-ha", "timezone": "Europe/Berlin", "imready4": True,
-                                   "ui_password": ""}))
-    monkeypatch.delenv("INTERVALS_API_KEY", raising=False)
-    monkeypatch.delenv("BRIDGE_TIMEZONE", raising=False)
-    monkeypatch.setenv("BRIDGE_IMREADY4_ENABLED", "false")                      # set already: wins
-    assert config.load_options_file(options) == ["INTERVALS_API_KEY", "BRIDGE_TIMEZONE"]
-    assert config._flag("BRIDGE_IMREADY4_ENABLED") is False
-
-
 def test_ui_port_setting(monkeypatch):
     monkeypatch.setenv("BRIDGE_UI_PORT", "8765")
     assert config._port("BRIDGE_UI_PORT") == 8765
@@ -506,11 +495,11 @@ def test_setup_says_what_the_garmin_sign_in_was_about():
 def test_read_only_settings_say_where_they_come_from(monkeypatch):
     monkeypatch.setattr(webui.autostart, "platform", lambda: "linux")
     monkeypatch.setenv("INVOCATION_ID", "a-systemd-service")              # the shipped ui unit
-    assert "/etc/garmin-intervals-bridge/env" in webui.settings_source(False)
+    assert "/etc/garmin-intervals-bridge/env" in webui.settings_source()
     monkeypatch.delenv("INVOCATION_ID")
-    assert webui.settings_source(False) == "the environment the bridge runs with"
+    assert webui.settings_source() == "the environment the bridge runs with"
     monkeypatch.setattr(webui.autostart, "platform", lambda: "container")
-    assert "container" in webui.settings_source(False) and "Home Assistant" in webui.settings_source(True)
+    assert "container" in webui.settings_source()
 
 
 def test_the_shipped_ui_unit_asks_for_the_password_and_listens_for_the_network():
@@ -521,7 +510,7 @@ def test_the_shipped_ui_unit_asks_for_the_password_and_listens_for_the_network()
     assert "Restart=on-abnormal" in unit                                    # no restart loop without a password
 
 
-# ---- the past: a backfill started from the page (Home Assistant has no terminal) ----
+# ---- the past: a backfill started from the page (no terminal needed) ----
 
 class FakeProcess:
     started: list = []

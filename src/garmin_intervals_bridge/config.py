@@ -153,39 +153,6 @@ def _port(name: str) -> int | None:
     return int(value)
 
 
-# A Home Assistant add-on hands its form to the container as /data/options.json.
-OPTIONS = {"intervals_api_key": "INTERVALS_API_KEY", "timezone": "BRIDGE_TIMEZONE",
-           "imready4": "BRIDGE_IMREADY4_ENABLED", "hrvtrend": "BRIDGE_HRVTREND_ENABLED",
-           "update_check": "BRIDGE_UPDATE_CHECK", "intervals_notes": "BRIDGE_INTERVALS_NOTES",
-           "ui_password": "BRIDGE_UI_PASSWORD", "alert_email": "BRIDGE_ALERT_EMAIL",
-           "smtp_password": "BRIDGE_SMTP_PASSWORD", "ntfy_url": "BRIDGE_NTFY_URL", "mode": "BRIDGE_MODE",
-           "swap": "BRIDGE_SWAP", "swap_method": "BRIDGE_SWAP_METHOD",
-           "poll_hours": "BRIDGE_POLL_HOURS", "poll_seconds": "BRIDGE_POLL_SECONDS",
-           "backup_hours": "BRIDGE_BACKUP_HOURS", "poll_quiet_seconds": "BRIDGE_POLL_QUIET_SECONDS",
-           "poll_mode": "BRIDGE_POLL_MODE"}
-
-
-def load_options_file(path: Path | None = None) -> list[str]:
-    """Settings from an add-on's options file (BRIDGE_OPTIONS_FILE, else /data/options.json);
-    variables already set win, as with a settings file."""
-    candidate = path or Path(os.getenv("BRIDGE_OPTIONS_FILE", "").strip() or "/data/options.json")
-    if not candidate.is_file():
-        return []
-    import json
-    try:
-        options = json.loads(candidate.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    loaded = []
-    for option, name in OPTIONS.items():
-        value = options.get(option) if isinstance(options, dict) else None
-        if value is None or value == "" or name in os.environ:
-            continue
-        os.environ[name] = str(value).lower() if isinstance(value, bool) else str(value)
-        loaded.append(name)
-    return loaded
-
-
 def _positive_int(name: str, default: int, max_value: int) -> int:
     raw = os.getenv(name, "").strip()                    # set but empty (`NAME=`): the default
     value = int(raw) if raw else default
@@ -277,8 +244,6 @@ class Settings:
     def from_env(cls) -> "Settings":
         settings_file = env_file()
         load_env_file(settings_file)
-        if settings_file is None:
-            load_options_file()
         tuning.validate()                # a typo in a timer setting stops the start, not a run hours later
         base = settings_file.parent.resolve() if settings_file is not None else Path.cwd()
         data_dir = _path("BRIDGE_DATA_DIR", "data", base)

@@ -17,13 +17,12 @@ Where the bridge stands and where it goes. Ideas and reports:
   experimental HRV-trend advice, 20 charts, a complete local archive – or *backup* mode
   without Intervals at all.
 - **Running it:** `setup` and autostart on Windows, Mac and Linux; containers for Synology,
-  Unraid and Docker; a Home Assistant app; systemd units; a web page with the Garmin sign-in;
+  Unraid and Docker; systemd units; a web page with the Garmin sign-in;
   alerts by calendar note, e-mail or push message.
 
 ## Next
 
-- **Home Assistant app:** feedback from real installs, then the polish it asks for.
-- **Umbrel and CasaOS:** entries in their app stores, once the Home Assistant app has settled.
+- **Umbrel and CasaOS:** entries in their app stores.
 - **History in backup mode** from the web page, not only from a terminal.
 
 ## Waiting for Intervals.icu
