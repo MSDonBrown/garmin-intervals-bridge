@@ -13,11 +13,10 @@ Where the bridge stands and where it goes. Ideas and reports:
   *Reprocess file*.
 - **Wellness:** the values the official integration misses, read once the watch has synced;
   the device's own wellness files and Health Snapshots; backfills of the past.
-- **More:** gear from Garmin onto the activities, ImReady4's training advice and an
+- **More:** gear from Garmin onto the activities, an
   experimental HRV-trend advice, 20 charts, a complete local archive – or *backup* mode
   without Intervals at all.
-- **Running it:** `setup` and autostart on Windows, Mac and Linux; containers for Synology,
-  Unraid and Docker; systemd units; a web page with the Garmin sign-in;
+- **Running it:** a container for Docker;
   alerts by calendar note, e-mail or push message.
 
 ## Next

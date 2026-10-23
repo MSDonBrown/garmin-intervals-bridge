@@ -48,8 +48,7 @@ garmin-intervals-bridge hrvtrend --from 2026-01-01 --compare     # next to ImRea
 garmin-intervals-bridge hrvtrend --from 2026-01-01 --apply       # creates the two fields, fills the days
 ```
 
-Then set `BRIDGE_HRVTREND_ENABLED=true` (systemd env file, `-e` for a container,
-`.env` on Windows and the Mac): each morning, right after ImReady4's advice, the
+Then set `BRIDGE_HRVTREND_ENABLED=true` (`-e` for a container, or the settings file): each morning the
 bridge writes the trend advice the same way – Intervals requests only, an empty
 field only, never a locked day, read back, once a day. The bridge creates the two
 wellness fields itself (a select with 1 Rest, 2 LIT, 3 Planned, 4 HIT, and a

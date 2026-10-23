@@ -1,19 +1,13 @@
 # Backup mode: your Garmin data on your own disk
 
 Not on Intervals.icu – or simply want a copy of everything Garmin Connect has about you?
-Backup mode keeps it in a folder on your computer, NAS or server, and keeps it current.
+Backup mode keeps it in a folder on your computer or server, and keeps it current.
 No Intervals account needed; nothing is written anywhere but that folder.
 
 ## Set it up
 
-Windows / Mac: install as in the [Windows](WINDOWS.md) or [Mac](MAC.md) guide, then
-`setup` and answer **2** to *"What should the bridge do?"*. It asks for your time zone,
-signs you in to Garmin, offers alerts, makes a first backup of the last days and starts
-backing up in the background, from then on whenever you log in to the computer.
-
-Container (Synology, Unraid, Docker): the same image, with `BRIDGE_MODE=backup` and the
-command `run` – no `INTERVALS_API_KEY`. Linux with systemd: `garmin-intervals-bridge run
---mode backup` as a service, or the autostart.
+Container: the image with `BRIDGE_MODE=backup` and the command `run` – no `INTERVALS_API_KEY`.
+Without a container: `garmin-intervals-bridge run --mode backup`.
 
 ## What it keeps, and where
 

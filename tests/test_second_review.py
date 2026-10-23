@@ -278,12 +278,10 @@ def test_status_check_exits_1_when_the_bridge_stopped(tmp_path, monkeypatch, cap
 
 
 def test_the_healthcheck_comes_with_the_templates_never_with_the_image():
-    # the healthcheck belongs to the templates (compose, Unraid), which set `status --check`
+    # the healthcheck belongs to the templates (compose), which sets `status --check`
     from pathlib import Path
     root = Path(__file__).parents[1]
     assert not any(line.strip().startswith("HEALTHCHECK")
                    for line in (root / "Dockerfile").read_text().splitlines())
     check = '"garmin-intervals-bridge", "status", "--check"'
-    assert check in (root / "compose.yaml").read_text() and check in (root / "docs" / "SYNOLOGY.md").read_text()
-    assert '--health-cmd "garmin-intervals-bridge status --check"' in (
-        root / "deploy" / "unraid" / "garmin-intervals-bridge.xml").read_text()
+    assert check in (root / "compose.yaml").read_text()

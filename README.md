@@ -4,8 +4,6 @@
 
 **Garmin filters the FIT files it sends to Intervals.icu. This puts the data back — and syncs a lot more.**
 
-**Set up in five minutes:** [Windows](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/WINDOWS.md) · [Mac](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/MAC.md) · [Synology](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/SYNOLOGY.md) · [Unraid](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/UNRAID.md) · [Linux & Docker](https://github.com/futureweb/garmin-intervals-bridge#running-it)
-
 - **Your Garmin metrics back** on every activity — Stamina, Recovery Time, VO₂max, Performance
   Condition, Training Effect, Sweat Loss … from the original file, nothing duplicated, training
   load untouched.
@@ -13,7 +11,7 @@
   stages, Body Battery, stress, readiness, logged nutrition, endurance & hill scores, race
   predictions … and the past, backfilled.
 - **And more** — your Garmin gear (bikes, shoes, skis) on the activities, 20 ready-made charts, a note or
-  push message when it needs you. It runs quietly in the background on your own computer, NAS or server.
+  push message when it needs you. It runs quietly in the background on your own computer or server.
 - **Not on Intervals?** [Backup mode](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/BACKUP.md) keeps all your Garmin data
   – original activity files, every day's wellness, the watch's own files – in a folder of yours.
 
@@ -376,11 +374,7 @@ Claude Desktop: open `futureweb-intervals-mcp-1.0.0b1.mcpb` from the
 
 ## Running it
 
-**systemd (recommended, no container):** an unprivileged service user, a
-`watch` timer (it starts every minute and looks when due, every 5 minutes by default) and a 30-minute full run, secrets in an
-`EnvironmentFile`, hardened units. See [deploy/README.md](deploy/README.md).
-
-**Windows, macOS or any PC without systemd:** `pip install garmin-intervals-bridge`, then `garmin-intervals-bridge run --apply` in a window that stays open.
+**Without a container:** `pip install garmin-intervals-bridge`, then `garmin-intervals-bridge run --apply` in a window that stays open.
 
 ### Upload mode: when the official import is off
 
@@ -409,15 +403,11 @@ garmin-intervals-bridge backfill --scope activities --from 2026-01-01 --archive-
 
 Uploads are de-duplicated against what Intervals already has (external id,
 file hash, start time) and never retried blindly: an upload with an unknown
-outcome stays `pending` until you check. Systemd users swap the watch timer
-for `deploy/systemd/garmin-intervals-bridge-upload.timer` (10 minutes) and
-keep the 30-minute unit for wellness.
+outcome stays `pending` until you check.
 
 **Docker / Podman:** a ready-made image is on the GitHub Container Registry,
 `ghcr.io/futureweb/garmin-intervals-bridge`, and on Docker Hub,
-`futurewebat/garmin-intervals-bridge` (for NAS boxes whose container manager
-only knows Docker Hub, e.g. Synology – step by step in [docs/SYNOLOGY.md](docs/SYNOLOGY.md), with a project
-file to paste; for Unraid there is a container template, [docs/UNRAID.md](docs/UNRAID.md)). Tags `latest` and the
+`futurewebat/garmin-intervals-bridge`. Tags `latest` and the
 version, amd64 and arm64. It runs as a non-root user and takes the same environment
 variables; without compose:
 
@@ -447,8 +437,7 @@ other command just uses those tokens. If Garmin answers the login with
 429, wait an hour and try again.
 
 The compose service runs `run` and restarts with the machine. It checks itself every 5 minutes
-(`status --check`, no request to anyone; the compose file, the Unraid template and the Synology
-guide set this healthcheck): `docker ps`, Portainer, Unraid or Synology show the container as
+(`status --check`, no request to anyone; the compose file sets this healthcheck): `docker ps` and Portainer show the container as
 *unhealthy* when no run came for about an hour – not during a break Intervals asked for, nor
 while it waits for a Garmin sign-in (the alerts tell you about that). With a plain `docker run`,
 add `--health-cmd "garmin-intervals-bridge status --check" --health-interval 5m`.
@@ -557,7 +546,6 @@ win. Relative paths in a settings file count from its folder.
 | `BRIDGE_STALE_HOURS` | `24` | `health` alerts once a service has failed this long |
 | `BRIDGE_HRVTREND_ENABLED` | `false` | `true`: write the experimental trend advice into `HRVTrendAdvice` each morning (see [docs/HRV_TREND.md](docs/HRV_TREND.md)) |
 | `BRIDGE_LOG_FILE` | | Also log to this file (5 MB, three old ones kept) |
-| `BRIDGE_ALLOW_ADMIN` | `false` | Windows: `true` lets the bridge run in a window opened *as administrator* (refused otherwise: folders created there are closed to the background bridge; see [docs/WINDOWS.md](docs/WINDOWS.md)) |
 | `BRIDGE_UPDATE_CHECK` | `true` | Once a day, ask pypi.org for the newest version and log a hint with the update command; `false` turns it off |
 | `BRIDGE_ALERT_EMAIL` | | Alerts by e-mail to this address, sent from its own mailbox (see [When the bridge needs you](#when-the-bridge-needs-you)) |
 | `BRIDGE_SMTP_PASSWORD` | | Password to send from that mailbox (often an app password) |
@@ -696,7 +684,6 @@ variable. Changes apply at the next start.
 | Garmin values gone after *Reprocess file* in Intervals | `enrich <the activity's id or link> --apply`. |
 | `outcome: unmatched` | The official import has not created the activity yet; the next run looks again. |
 | `status` lists a *pending* upload | Upload mode: the request's outcome is unknown. Check Intervals before `reset-pending`. |
-| `203/EXEC Permission denied` under systemd | SELinux: the virtualenv must not live under a web document root. |
 
 ## Security and privacy
 

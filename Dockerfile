@@ -6,7 +6,7 @@ COPY src ./src
 RUN pip install --no-cache-dir . && useradd --uid 10001 --create-home bridge && mkdir -p /data && chown bridge:bridge /data
 USER bridge
 ENV BRIDGE_DATA_DIR=/data GARMIN_TOKEN_DIR=/data/tokens BRIDGE_IN_CONTAINER=1
-# No HEALTHCHECK in the image: compose.yaml and the Unraid template set it (`status --check`,
+# No HEALTHCHECK in the image: compose.yaml sets it (`status --check`,
 # every 5 minutes).
 ENTRYPOINT ["garmin-intervals-bridge"]
 # `run`: polls, full runs, the daily health check – a dry run until the command says --apply
