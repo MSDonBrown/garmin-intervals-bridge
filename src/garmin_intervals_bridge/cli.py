@@ -11,11 +11,11 @@ from contextlib import ExitStack
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import __version__, alerts, autostart, hrvtrend, imready4, notices, polling, tuning, webui, wizard
+from . import __version__, alerts, hrvtrend, notices, polling, tuning
 from .backup import backup_once, backup_range
 from .backup import describe as describe_backup
 from .charts import setup_charts
-from .config import Settings, _flag, configured_log_file, load_env_file
+from .config import Settings, configured_log_file
 from .enrich import enrich_activity, exact_match, gap_report, intervals_id_from, match_activity, resolve_one
 from .fit import compare_fit, extract_original_fit, sha256
 from .garmin import DAY_ENDPOINTS, GarminBlocked, GarminLoginNeeded, GarminSource, parse_endpoints
@@ -51,23 +51,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env-file", type=Path, metavar="PATH",
                         help="Settings file (default: ./.env, else ~/GarminBridge/.env as `setup` writes it)")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("setup", help="Set the bridge up step by step: Intervals key, time zone, Garmin login, "
-                                 "extras, a trial run, start at logon (interactive; run it again to change "
-                                 "anything)")
-    start = sub.add_parser("autostart", help="Start the bridge (run --apply) in the background whenever you log "
-                                             "in: Windows Task Scheduler, macOS LaunchAgent, Linux systemd user "
-                                             "service; again = restart with the current settings")
-    what = start.add_mutually_exclusive_group()
-    what.add_argument("--remove", action="store_true", help="Stop it and remove the autostart")
-    what.add_argument("--status", action="store_true", help="Show whether it is set up")
-    what.add_argument("--dry-run", action="store_true", help="Show the files and commands, change nothing")
-    start.add_argument("--mode", choices=["enrich", "upload", "backup"], help="As for `run` (default BRIDGE_MODE)")
-    page = sub.add_parser("ui", help="Open the bridge's web page in your browser: status, Garmin sign-in (MFA), "
-                                     "settings, gear and chart actions, the log. Until Ctrl+C")
-    page.add_argument("--port", type=int, default=webui.DEFAULT_PORT)
-    page.add_argument("--host", default="127.0.0.1",
-                      help="127.0.0.1 (default) = this computer only; anything else needs BRIDGE_UI_PASSWORD")
-    page.add_argument("--no-browser", action="store_true", help="Only print the link")
     sub.add_parser("notify-test", help="Send a test e-mail / push message to the alert channels set up "
                                        "(BRIDGE_ALERT_EMAIL, BRIDGE_NTFY_URL)")
     sub.add_parser("login", help="Sign into Garmin once and save refreshable tokens (interactive)")
@@ -223,25 +206,13 @@ def build_parser() -> argparse.ArgumentParser:
     gear.add_argument("--recalc", action="store_true",
                       help="Also recount the totals of every paired gear and its components with Intervals' own "
                            "count, when they drifted (e.g. after reassignments by hand)")
-    advice = sub.add_parser("imready4", help="ImReady4-compatible training advice from Intervals' HRV and resting "
-                                             "HR into the TrainingAdvice field: a day (default today), a range, a "
-                                             "comparison with values already there (dry run unless --apply)")
-    advice.add_argument("--date", help="YYYY-MM-DD (default: today)")
-    advice.add_argument("--from", dest="start", help="YYYY-MM-DD: a range instead of one day")
-    advice.add_argument("--to", dest="end", help="YYYY-MM-DD (default: today)")
-    advice.add_argument("--compare", action="store_true",
-                        help="Compare with the values TrainingAdvice already holds (e.g. from running ImReady4)")
-    advice.add_argument("--apply", action="store_true", help="Write days whose TrainingAdvice is empty")
-    advice.add_argument("--overwrite", action="store_true",
-                        help="Also replace values TrainingAdvice already holds (with --apply)")
-    advice.add_argument("--details", action="store_true", help="With --compare: list every day too")
     trend = sub.add_parser("hrvtrend", help="Experimental: training advice from the 7-day HRV trend into its own "
-                                            "field HRVTrendAdvice (+ HRVTrendCV), next to ImReady4's; a day, a "
+                                            "field HRVTrendAdvice (+ HRVTrendCV); a day, a "
                                             "range, a comparison with TrainingAdvice (dry run unless --apply)")
     trend.add_argument("--date", help="YYYY-MM-DD (default: today)")
     trend.add_argument("--from", dest="start", help="YYYY-MM-DD: a range instead of one day")
     trend.add_argument("--to", dest="end", help="YYYY-MM-DD (default: today)")
-    trend.add_argument("--compare", action="store_true", help="Compare with ImReady4's TrainingAdvice")
+    trend.add_argument("--compare", action="store_true", help="Compare with the values TrainingAdvice already holds")
     trend.add_argument("--apply", action="store_true",
                        help="Create the two fields if missing and write days whose HRVTrendAdvice is empty")
     trend.add_argument("--overwrite", action="store_true", help="Also replace existing HRVTrendAdvice values")
@@ -333,8 +304,6 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
     next_sync, count, failures = 0.0, 0, 0
     next_health = time.time() + _t("BRIDGE_HEALTH_FIRST_SECONDS")
     tick = min(_t("BRIDGE_TICK_SECONDS"), poll_seconds)
-    # only a web page in this process can wake the loop ("Check now"); one elsewhere waits for the tick
-    waker = polling.POLL_NOW if getattr(settings, "ui_port", None) else None
     polling.ACTIVE.update(fast=poll_seconds, mode=mode)
     log.info("garmin-intervals-bridge %s running (%s mode): polls %s; full run every %d min, %s", __version__,
              mode, polling.schedule_text(settings, store, time.time(), poll_seconds), sync_minutes,
@@ -439,8 +408,7 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
             log.info("Stopped")
             return 0
         except GarminBlocked as exc:
-            on_page = isinstance(exc, GarminLoginNeeded) and getattr(settings, "ui_port", None)
-            log.warning("%s%s; pausing for %d minutes", exc, ", or sign in on the web page" if on_page else "",
+            log.warning("%s; pausing for %d minutes", exc,
                         round(_t("BRIDGE_BLOCK_PAUSE_SECONDS") / 60))
             if isinstance(exc, GarminLoginNeeded):
                 notices.login_needed(settings, store, intervals, datetime.now(settings.timezone).date(), apply=apply)
@@ -465,11 +433,7 @@ def run_loop(settings: Settings, store: Store, *, apply: bool, poll_seconds: int
             # wake when the next look is due (within a tick), for a full run at the latest
             wait = polling.seconds_to_next(settings, store, time.time(), poll_seconds, mode)
             pause = max(1.0, min(tick, wait if wait is not None else tick, max(0.0, next_sync - time.time()) or tick))
-            if waker is not None:
-                waker.wait(pause)
-                waker.clear()
-            else:
-                time.sleep(pause)
+            time.sleep(pause)
     return 0
 
 
@@ -500,8 +464,7 @@ def run_backup_loop(settings: Settings, store: Store, *, every_minutes: int, ite
             log.info("Stopped")
             return 0
         except GarminBlocked as exc:
-            on_page = isinstance(exc, GarminLoginNeeded) and getattr(settings, "ui_port", None)
-            log.warning("%s%s; pausing for %d minutes", exc, ", or sign in on the web page" if on_page else "",
+            log.warning("%s; pausing for %d minutes", exc,
                         round(_t("BRIDGE_BLOCK_PAUSE_SECONDS") / 60))
             if isinstance(exc, GarminLoginNeeded):
                 notices.login_needed(settings, store, None, datetime.now(settings.timezone).date(), apply=False)
@@ -571,61 +534,8 @@ def _log_to_file(path: Path, level: int) -> None:
     root.addHandler(handler)
 
 
-def _autostart(args: argparse.Namespace, settings: Settings) -> int:
-    if settings.env_file is None:
-        raise ValueError(f"No settings file: run `{wizard.command_name()} setup` first (or pass --env-file)")
-    if args.status:
-        state = autostart.status(settings.env_file)
-        print(f"Autostart ({state['kind']}): {'set up' if state['installed'] else 'not set up'}")
-        if state["detail"] and state["installed"]:
-            print(state["detail"])
-        if settings.log_file:
-            print(f"Log: {settings.log_file}")
-        return 0 if state["installed"] else 1
-    if args.dry_run:
-        steps = autostart.plan(settings.env_file, mode=args.mode or settings.mode)
-        print(json.dumps({k: v for k, v in steps.items() if k != "encoding"}, indent=2))
-        return 0
-    if args.remove:
-        autostart.remove(settings.env_file)
-        print("Autostart removed; the bridge is stopped. Your settings and data stay where they are.")
-        return 0
-    steps = autostart.install(settings.env_file, mode=args.mode or settings.mode)
-    print("The bridge now runs in the background and starts by itself whenever you log in to this computer.")
-    if settings.log_file:
-        print(f"Log: {settings.log_file}")
-    else:
-        print("Tip: BRIDGE_LOG_FILE=bridge.log in the settings file gives it a log file.")
-    if steps.get("note"):
-        print(f"Note: {steps['note']}")
-    print(f"Stop it: {wizard.command_name()} autostart --remove")
-    return 0
-
-
-ADMIN_WINDOW = ("This window runs as administrator. Folders the bridge creates from here would belong to the "
-                "Administrators group, and the background bridge – which runs without admin rights – could not "
-                "write to them later; a task registered from here only such a window could replace. Please use a "
-                "normal PowerShell window: nothing in the bridge needs admin rights. (To run it as administrator "
-                "anyway: BRIDGE_ALLOW_ADMIN=true in the settings file.)")
-
-
-def _admin_window_ok(args: argparse.Namespace, log: logging.Logger) -> bool:
-    """Windows: not from a window opened "as administrator" – except to clear up after one."""
-    if not autostart.elevated_window():
-        return True
-    if args.cmd == "autostart" and (args.remove or args.status or args.dry_run):
-        return True                                   # what clears up a task such a window set up
-    load_env_file()                                   # BRIDGE_ALLOW_ADMIN may be in the settings file
-    if _flag("BRIDGE_ALLOW_ADMIN"):
-        log.warning("Running as administrator (BRIDGE_ALLOW_ADMIN): the background bridge runs without admin "
-                    "rights and may not be able to write to folders created from here")
-        return True
-    log.error(ADMIN_WINDOW)
-    return False
-
-
 def main(argv: list[str] | None = None) -> int:
-    # pythonw.exe (the Windows autostart) has no console: no stdout or stderr to write to
+    # pythonw.exe has no console: no stdout or stderr to write to
     for name in ("stdout", "stderr"):
         if getattr(sys, name) is None:
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
@@ -643,27 +553,19 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("enrich needs the Intervals activity: enrich i12345678 (or its link)")
         if args.env_file:
             os.environ["BRIDGE_ENV_FILE"] = str(args.env_file)
-        if not _admin_window_ok(args, log):
-            return 1
-        if args.cmd == "setup":
-            return wizard.run()
         log_file = configured_log_file()
         if log_file:
             _log_to_file(log_file, level)
         settings = Settings.from_env()
-        if args.cmd == "autostart":
-            return _autostart(args, settings)
         settings.ensure_data_dir()
         if args.cmd == "sync-now":
             from . import ondemand
             return ondemand.run(args, settings)
-        if args.cmd == "ui":
-            return webui.serve(host=args.host, port=args.port, open_browser=not args.no_browser)
         if args.cmd == "notify-test":
             result = alerts.test(settings)
             if not result:
                 print("No alerts set up: BRIDGE_ALERT_EMAIL with BRIDGE_SMTP_PASSWORD, and/or BRIDGE_NTFY_URL "
-                      "(setup asks for them).")
+                      ".")
                 return 1
             for channel, outcome in result.items():
                 print(f"{channel}: {outcome}")
@@ -691,7 +593,6 @@ def main(argv: list[str] | None = None) -> int:
                        else ("gear",) if args.cmd == "gear"
                        # one activity on request: next to a running `run`, writes are idempotent
                        else ("enrich",) if args.cmd in ("enrich", "swap")
-                       else ("imready4",) if args.cmd == "imready4"
                        else ("hrvtrend",) if args.cmd == "hrvtrend"
                        # read-only diagnosis must work next to a running `run`: no shared state written
                        else () if args.cmd in ("status", "snapshot-account", "gap")
@@ -748,7 +649,7 @@ def main(argv: list[str] | None = None) -> int:
                     fields = intervals.provision_fields(apply=args.apply)
                     print(json.dumps({"apply": args.apply, "missing_codes": fields}, indent=2))
                     return 0
-                if args.cmd in ("imready4", "hrvtrend"):
+                if args.cmd == "hrvtrend":
                     intervals = IntervalsClient(settings.intervals_api_key, settings.intervals_athlete_id)
                     today = datetime.now(settings.timezone).date()
                     if args.date and args.start:
@@ -757,8 +658,7 @@ def main(argv: list[str] | None = None) -> int:
                     end = date.fromisoformat(args.end) if args.end else (today if args.start else start)
                     if start > end:
                         raise ValueError("--from must not be after --to")
-                    feature = imready4 if args.cmd == "imready4" else hrvtrend
-                    out = feature.run_days(intervals, start, end, apply=args.apply, overwrite=args.overwrite,
+                    out = hrvtrend.run_days(intervals, start, end, apply=args.apply, overwrite=args.overwrite,
                                             compare=args.compare, details=args.details, today=today)
                     print(json.dumps(out, indent=2, ensure_ascii=False))
                     return 0
@@ -880,11 +780,6 @@ def main(argv: list[str] | None = None) -> int:
                         settings.backup_hours * 60 if mode == "backup" else _t("BRIDGE_SYNC_MINUTES"))
                     if poll < (300 if mode == "upload" else 30) or every < 5:
                         raise ValueError("--poll-seconds too small for this mode, or --sync-minutes < 5")
-                    if settings.ui_port:
-                        try:
-                            webui.start_in_background(settings.ui_port, settings.ui_host)
-                        except (ValueError, OSError) as exc:       # the bridge runs on without its page
-                            log.error("No web page: %s", exc)
                     if mode == "backup":
                         with single_instance(settings.data_dir, ("activities", "wellness")):
                             return run_backup_loop(settings, store, every_minutes=every,

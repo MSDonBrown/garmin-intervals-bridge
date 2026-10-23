@@ -8,7 +8,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from . import hrvtrend, imready4, tuning
+from . import hrvtrend, tuning
 from .config import Settings
 from .enrich import enrich_activity, load_field_mappings
 from .fit import sha256, validate_fit, wellness_bundle_index
@@ -945,8 +945,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
     # the advice waits for the night Garmin reads – unless Garmin has none: no Garmin watch at night,
     # HRV and resting HR come into Intervals from elsewhere, and the advice takes them from there
     night_read = bool(morning) or not _garmin_nights(store, current)
-    advice_due = night_read and (imready4.due(settings, store, current, now_ts, apply=apply)
-                                 or hrvtrend.due(settings, store, current, now_ts, apply=apply))
+    advice_due = night_read and hrvtrend.due(settings, store, current, now_ts, apply=apply)
     if (morning and not watching and not pending_past and not readiness_due and not unwritten and not files_due
             and not advice_due):
         return metrics
@@ -1099,7 +1098,7 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
             write(day, raw)
 
     # the advice once the night (and any Health Snapshot correction) is in Intervals: Intervals requests only
-    for key, feature in (("advice", imready4), ("trend_advice", hrvtrend)):
+    for key, feature in (("trend_advice", hrvtrend),):
         if (morning or night_read) and feature.due(settings, store, current, now_ts, apply=apply):
             try:
                 metrics[key] = feature.morning(settings, intervals, store, current, now, apply=apply)
@@ -1110,7 +1109,6 @@ def wellness_check(settings: Settings, garmin: Any, intervals: Any, store: Store
 
     if store.get_meta("wellness:pruned") != current.strftime("%Y-%m"):
         store.delete_meta("wellness:*:20*", now_ts - 40 * 86400)     # per-day bookkeeping, once a month
-        store.delete_meta("imready4:*20*", now_ts - 40 * 86400)
         store.delete_meta("hrvtrend:*20*", now_ts - 40 * 86400)
         store.set_meta("wellness:pruned", current.strftime("%Y-%m"))
     metrics["new_fields"] = sorted(set(metrics["new_fields"]))

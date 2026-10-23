@@ -130,7 +130,7 @@ def at(hour, minute=0, day=DAY):
 
 def test_the_morning_writes_once_when_switched_on(tmp_path):
     st, iv = Store(tmp_path), Intervals(history())
-    off = SimpleNamespace(timezone=TZ, imready4=True)
+    off = SimpleNamespace(timezone=TZ)
     assert not hrvtrend.due(off, st, DAY, at(9).timestamp(), apply=True)          # its own switch
     on = SimpleNamespace(timezone=TZ, hrvtrend=True)
     result = hrvtrend.morning(on, iv, st, DAY, at(9), apply=True)
@@ -164,8 +164,12 @@ def test_command_compares_with_imready4_and_fills_its_field(tmp_path, monkeypatc
     assert all("TrainingAdvice" not in changes for _, changes in iv.writes)
 
 
-def test_the_morning_wellness_run_writes_both_advices_side_by_side(tmp_path):
-    from test_imready4 import FIELD_ITEM
+FIELD_ITEM = {"id": 351492, "type": "INPUT_FIELD", "content": {"code": "TrainingAdvice", "type": "select", "options": [
+    {"text": "Rest", "value": 1.0}, {"text": "LIT", "value": 2.0}, {"text": "Planned", "value": 3.0},
+    {"text": "HIT", "value": 4.0}]}}
+
+
+def test_the_morning_wellness_run_writes_the_trend_advice(tmp_path):
     from test_wellness_schedule import Intervals as WellnessIntervals
     from test_wellness_schedule import at as morning_at
     from test_wellness_schedule import fresh
@@ -191,11 +195,11 @@ def test_the_morning_wellness_run_writes_both_advices_side_by_side(tmp_path):
         i.records[date.fromisoformat(r["id"])] = {**{k: v for k, v in r.items() if k != "id"},
                                                   "restingHR": r["avgSleepingHR"]}
     s = SimpleNamespace(data_dir=tmp_path, timezone=TZ, wellness_days=2, wellness_profile="all", activity_days=3,
-                        imready4=True, hrvtrend=True)
+                        hrvtrend=True)
     g.sleep = g.readiness = True
     i.records[today]["sleepSecs"] = 28080
     m = wellness_check(s, g, i, st, apply=True, now=morning_at(9, 50), throttle=False)
-    assert m["advice"]["action"] == "written" and m["trend_advice"]["action"] == "written"
+    assert m["trend_advice"]["action"] == "written"
     fields = {k for _, changes in i.writes for k in changes}
-    assert {"TrainingAdvice", "HRVTrendAdvice", "HRVTrendCV"} <= fields
+    assert {"HRVTrendAdvice", "HRVTrendCV"} <= fields and "TrainingAdvice" not in fields
     st.close()

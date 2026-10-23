@@ -52,20 +52,3 @@ jobs:
         env:
           INTERVALS_API_KEY: not-a-real-key
           BRIDGE_DATA_DIR: ${{ runner.temp }}/bridge-data
-      # What `setup` does at its end, for real on this throwaway machine: register the logon
-      # task (Windows) / LaunchAgent (macOS), ask for it, remove it again.
-      - name: autostart
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/GarminBridge"
-          printf 'INTERVALS_API_KEY=not-a-real-key\nBRIDGE_LOG_FILE=bridge.log\n' > "$RUNNER_TEMP/GarminBridge/.env"
-          bridge="python -m garmin_intervals_bridge --env-file $RUNNER_TEMP/GarminBridge/.env"
-          $bridge autostart --dry-run
-          $bridge autostart
-          $bridge autostart --status
-          # the background bridge itself starts (no window, no terminal) and writes its log file
-          for i in $(seq 1 45); do grep -q "running (enrich mode)" "$RUNNER_TEMP/GarminBridge/bridge.log" 2>/dev/null && break; sleep 2; done
-          cat "$RUNNER_TEMP/GarminBridge/bridge.log"
-          grep -q "running (enrich mode)" "$RUNNER_TEMP/GarminBridge/bridge.log"
-          $bridge autostart --remove
-          ! $bridge autostart --status

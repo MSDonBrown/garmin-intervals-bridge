@@ -1,6 +1,6 @@
 # Experimental: training advice from the HRV trend
 
-ImReady4 (see [IMREADY4.md](IMREADY4.md)) judges each morning's single values. The
+ImReady4 judges each morning's single values. The
 studies that guided endurance training by HRV mostly judged the trend of a week.
 This experiment calculates such a trend advice and writes it into a field of its
 own, **`HRVTrendAdvice`**, next to ImReady4's `TrainingAdvice` – so both can be

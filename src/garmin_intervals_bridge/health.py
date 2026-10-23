@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Any
 
 from . import alerts, notices, tuning
-from .autostart import platform
 from .config import within_hours
 from .mapping import map_wellness
 
@@ -93,7 +92,7 @@ def probe(settings: Any, garmin: Any, intervals: Any, store: Any, *, now: float 
         report["findings"].append({"alert": False, "what": "day boundary in UTC",
                                    "detail": "no BRIDGE_TIMEZONE and no time zone on this computer (a container?): "
                                              "set BRIDGE_TIMEZONE to yours, e.g. Europe/London"})
-    update = notices.update_finding(settings, in_container=platform() == "container")
+    update = notices.update_finding(settings, in_container=bool(os.getenv("BRIDGE_IN_CONTAINER")))
     if update:
         report["findings"].append(update)
     for f in report["findings"]:

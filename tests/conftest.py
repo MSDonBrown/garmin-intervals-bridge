@@ -20,7 +20,7 @@ def _empty_home(tmp_path_factory, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolated_process():
-    """`main` and `setup` set variables and add a log file handler, as they should in a real process."""
+    """`main` sets variables and add a log file handler, as they should in a real process."""
     saved = dict(os.environ)
     yield
     os.environ.clear()
@@ -29,14 +29,6 @@ def _isolated_process():
     for handler in [h for h in root.handlers if isinstance(h, RotatingFileHandler)]:
         root.removeHandler(handler)
         handler.close()
-
-
-@pytest.fixture(autouse=True)
-def _normal_window(monkeypatch):
-    """A CI runner may run elevated: the refusal of a Windows administrator window stays out of the
-    other tests (test_admin_window.py checks it and the real token check)."""
-    from garmin_intervals_bridge import autostart
-    monkeypatch.setattr(autostart, "elevated_window", lambda: False)
 
 
 LOCAL = ("127.0.0.1", "::1", "localhost")

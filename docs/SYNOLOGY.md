@@ -38,7 +38,6 @@ services:
       BRIDGE_TIMEZONE: "Europe/London"           # yours: which date last night's sleep belongs to
       BRIDGE_UI_PORT: "8765"                     # the bridge's web page
       BRIDGE_UI_PASSWORD: "change-me-please"     # your own password for that page, 8+ characters
-      # BRIDGE_IMREADY4_ENABLED: "true"          # ImReady4's training advice, see docs/IMREADY4.md
       # BRIDGE_SWAP: "true"                      # the original into Garmin's filtered copy (README: Modes)
       # BRIDGE_POLL_HOURS: "6-22"                # look for new activities only then (README: How often it looks)
       # BRIDGE_POLL_MODE: "adaptive"             # beta: look often only when your activities usually end

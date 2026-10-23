@@ -8,11 +8,6 @@ services:
     environment:
       BRIDGE_DATA_DIR: /data
       GARMIN_TOKEN_DIR: /data/tokens
-      # The web page (status, Garmin sign-in with MFA, settings, actions) on port 8765:
-      # BRIDGE_UI_PORT: "8765"
-      # BRIDGE_UI_PASSWORD: "change-me-please"     # your own, 8+ characters
-    # ports:
-    #   - "127.0.0.1:8765:8765"                    # or "8765:8765" for the whole network
     volumes:
       - ./data:/data
     # Runs as UID 10001 (see Dockerfile); the data directory must be writable by it.

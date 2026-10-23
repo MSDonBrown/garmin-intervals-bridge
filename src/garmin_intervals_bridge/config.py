@@ -214,14 +214,11 @@ class Settings:
     wellness_profile: str = "recommended"
     stale_hours: int = 24
     timezone_source: str = "BRIDGE_TIMEZONE"
-    imready4: bool = False
     hrvtrend: bool = False
     env_file: Path | None = None
     log_file: Path | None = None
     update_check: bool = True
     intervals_notes: bool = True
-    ui_port: int | None = None
-    ui_host: str = "127.0.0.1"
     alert_email: str | None = None
     smtp_host: str | None = None
     smtp_port: int | None = None
@@ -271,15 +268,11 @@ class Settings:
             wellness_profile=profile,
             stale_hours=_positive_int("BRIDGE_STALE_HOURS", 24, 24 * 30),
             timezone_source=tz_source,
-            imready4=_flag("BRIDGE_IMREADY4_ENABLED"),
             hrvtrend=_flag("BRIDGE_HRVTREND_ENABLED"),
             env_file=settings_file.resolve() if settings_file is not None else None,
             log_file=_path("BRIDGE_LOG_FILE", None, base),
             update_check=_flag("BRIDGE_UPDATE_CHECK", True),
             intervals_notes=_flag("BRIDGE_INTERVALS_NOTES", True),
-            ui_port=_port("BRIDGE_UI_PORT"),
-            ui_host=os.getenv("BRIDGE_UI_HOST", "").strip() or (
-                "0.0.0.0" if os.getenv("BRIDGE_IN_CONTAINER") else "127.0.0.1"),
             alert_email=_text("BRIDGE_ALERT_EMAIL"),
             smtp_host=_text("BRIDGE_SMTP_HOST"),
             smtp_port=_port("BRIDGE_SMTP_PORT"),

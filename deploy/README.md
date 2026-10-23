@@ -164,40 +164,6 @@ one mail a day through the same `OnFailure=` hook. The timer runs it once a day:
 systemctl enable --now garmin-intervals-bridge-health.timer
 ```
 
-## The web page (optional)
-
-`garmin-intervals-bridge-ui.service` serves the bridge's web page – status, the Garmin
-sign-in with MFA (the way to renew an expired session without a terminal), gear and chart
-plans, the log hint – to the other computers in your network. It asks for a password: put
-`BRIDGE_UI_PASSWORD=` (8 characters or more) into `/etc/garmin-intervals-bridge/env`, then
-
-```bash
-cp deploy/systemd/garmin-intervals-bridge-ui.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now garmin-intervals-bridge-ui
-```
-
-and open `http://<this computer>:8765`. The settings show read-only there (they live in the
-env file). Plain http: keep it in your home network or put it behind a reverse proxy with
-HTTPS. For this computer only, change `0.0.0.0` in the unit to `127.0.0.1` and use an SSH
-tunnel (`ssh -L 8765:127.0.0.1:8765 <this computer>`).
-
-## ImReady4 training advice (optional)
-
-To have the morning runs write ImReady4's training advice into the existing
-`TrainingAdvice` wellness field, add `BRIDGE_IMREADY4_ENABLED=true` to
-`/etc/garmin-intervals-bridge/env`; the next run of the watch timer picks it
-up, no new timer is needed. Before that, see what it would write today (as
-the service user, with the same environment as the units, like the backfills
-above):
-
-```bash
-garmin-intervals-bridge imready4                              # today, dry run
-garmin-intervals-bridge imready4 --from 2026-01-01 --compare  # against the advice already in the field
-```
-
-Afterwards the journal shows `ImReady4 advice for …` once each morning.
-Details: [docs/IMREADY4.md](../docs/IMREADY4.md).
-
 ## Notes
 
 - A `watch` without `--apply` still records the activities it saw; after

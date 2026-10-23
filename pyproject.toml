@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 license = "MIT"
 authors = [{name = "Andreas Schnederle-Wagner"}]
 keywords = ["garmin", "garmin-connect", "intervals.icu", "intervals-icu", "fit", "wellness", "hrv", "sleep",
-            "sync", "cycling", "running", "triathlon", "imready4", "self-hosted"]
+            "sync", "cycling", "running", "triathlon", "self-hosted"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

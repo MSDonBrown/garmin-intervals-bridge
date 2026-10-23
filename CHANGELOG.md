@@ -4,6 +4,9 @@
 
 ### Removed
 
+- **`autostart`, the web page (`ui`, `BRIDGE_UI_*`) and ImReady4 (`imready4`, `BRIDGE_IMREADY4_ENABLED`):**
+  the modules, their commands, tests, docs, systemd ui unit and Unraid entries. `setup` went with them
+  (it only existed to configure autostart and ImReady4). `hrvtrend` stays.
 - **The Home Assistant app:** `home-assistant/`, `repository.yaml`, `docs/HOME_ASSISTANT.md`, the
   settings-form loader (`BRIDGE_OPTIONS_FILE`, `/data/options.json`) and the web page's ingress mode
   (`BRIDGE_UI_INGRESS`). Docker, Unraid, Synology and systemd are unchanged.

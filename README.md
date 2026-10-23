@@ -12,9 +12,8 @@
 - **The wellness the official sync misses** — night SpO₂, respiration, HRV details, sleep
   stages, Body Battery, stress, readiness, logged nutrition, endurance & hill scores, race
   predictions … and the past, backfilled.
-- **And more** — your Garmin gear (bikes, shoes, skis) on the activities, ImReady4's daily
-  training advice, 20 ready-made charts, a web page, a note or push message when it needs
-  you. It runs quietly in the background on your own computer, NAS or server.
+- **And more** — your Garmin gear (bikes, shoes, skis) on the activities, 20 ready-made charts, a note or
+  push message when it needs you. It runs quietly in the background on your own computer, NAS or server.
 - **Not on Intervals?** [Backup mode](https://github.com/futureweb/garmin-intervals-bridge/blob/main/docs/BACKUP.md) keeps all your Garmin data
   – original activity files, every day's wellness, the watch's own files – in a folder of yours.
 
@@ -112,22 +111,11 @@ and never assumed.
 
 ```bash
 pip install garmin-intervals-bridge          # Windows: py -m pip install garmin-intervals-bridge
-garmin-intervals-bridge setup                # Windows: py -m garmin_intervals_bridge setup
 ```
 
-On Linux (and with Homebrew's Python on a Mac) pip refuses to install into the system's
-Python – never use `--break-system-packages`; give the bridge its own environment instead:
-`pipx install garmin-intervals-bridge`, or `python3 -m venv ~/GarminBridge/venv`, then
-`~/GarminBridge/venv/bin/pip install garmin-intervals-bridge` and
-`~/GarminBridge/venv/bin/garmin-intervals-bridge setup` (Debian/Ubuntu: `apt install
-python3-venv` first). The autostart uses that environment.
-
-`setup` asks for the Intervals API key (checked on the spot), confirms the time
-zone, signs in to Garmin (MFA supported), offers gear, charts and the training
-advice, shows a trial run that writes nothing and, on your yes, starts the bridge
-in the background at every login: Task Scheduler on Windows (no window), a
-LaunchAgent on the Mac, a systemd user service on Linux. Settings, log and data
-live in `~/GarminBridge`. Step by step: [Windows](docs/WINDOWS.md), [Mac](docs/MAC.md).
+Put `INTERVALS_API_KEY` and `BRIDGE_TIMEZONE` in a settings file or the environment, sign in to
+Garmin with `garmin-intervals-bridge login`, then start it with `garmin-intervals-bridge run --apply`
+(`run` without `--apply` is a dry run). All settings: [Configuration](#configuration).
 
 **For development**, or to try single commands by hand:
 
@@ -161,9 +149,6 @@ run is exactly what `--apply` would send.
 
 | Command | What it does |
 | --- | --- |
-| `setup` | Interactive setup: API key, time zone, Garmin sign-in, extras, a trial run, start at login. Again = change settings. |
-| `autostart [--status \| --remove \| --dry-run]` | Run `run --apply` in the background at every login (Windows Task Scheduler, macOS LaunchAgent, Linux systemd user service); again = restart. |
-| `ui [--port 8765] [--no-browser]` | The bridge's web page in your browser: status in plain words, Garmin sign-in with MFA, settings, gear and chart actions, the log. See [The web page](#the-web-page). |
 | `backup [--from DATE [--to DATE]] [--scope …]` | Back up Garmin into the data folder, no Intervals needed: without `--from` what backup mode does every `BRIDGE_BACKUP_HOURS`, with `--from` the past. Runs next to a running bridge. |
 | `swap <id or link> [--method replace\|upload] [--apply]` | The original into Garmin's filtered copy of one activity, also an older one (see [Modes](#modes), *swap*). |
 | `notify-test` | Send a test e-mail / push message to the alert channels that are set up. |
@@ -179,8 +164,7 @@ run is exactly what `--apply` would send.
 | `setup-fields [--apply]` | Create the private custom wellness fields the mapping uses. |
 | `setup-charts [--apply]` | Create (and later complete) private fitness charts for the synced values. |
 | `gear [--prefer intervals\|evidence\|garmin] [--map G=I] [--create] [--apply]` | Put Garmin's gear (bikes, shoes, skis …) on the Intervals activities, from the archive; see [Gear](#gear). |
-| `imready4 [--date D \| --from D [--to D]] [--compare] [--apply] [--overwrite]` | ImReady4-compatible training advice into `TrainingAdvice`: preview, comparison with existing values, filling the past; see [Training advice](#training-advice-imready4). |
-| `hrvtrend [--date D \| --from D [--to D]] [--compare] [--apply] [--overwrite]` | Experimental trend advice into its own field `HRVTrendAdvice`, compared with ImReady4's; see [docs/HRV_TREND.md](docs/HRV_TREND.md). |
+| `hrvtrend [--date D \| --from D [--to D]] [--compare] [--apply] [--overwrite]` | Experimental trend advice into its own field `HRVTrendAdvice`; see [docs/HRV_TREND.md](docs/HRV_TREND.md). |
 | `run [--apply] [--mode …] [--poll-seconds N] [--sync-minutes N]` | Keep running in one process: a poll every 5 minutes (see [How often it looks](#how-often-it-looks)), a full run every 30 minutes, the daily health check (what autostart and the containers start). See [Running it](#running-it). |
 | `status [--check]` | Pending uploads and failed activities with their retry time. `--check`: exit 1 when the bridge has stopped working – no run for twice the expected time (the container image's healthcheck). |
 | `reset-pending --activity-id <garmin id>` | Upload mode: clear a pending upload after you checked Intervals by hand. |
@@ -338,25 +322,9 @@ garmin-intervals-bridge gear …` (it does not wait for the running bridge).
   running container for it). Activities from Strava cannot be changed through
   Intervals' API and are left alone.
 
-## Training advice (ImReady4)
+## Training advice (experimental)
 
-If you use [ImReady4](https://forum.intervals.icu/t/how-to-guide-imready4-app-for-hrv-guided-training/25778)
-(by @Inigo_Tolosa and @MedTechCD) for HRV-guided training, you know the
-morning routine: open MATLAB Mobile, run the script, and it writes Rest, LIT,
-Planned or HIT into the `TrainingAdvice` wellness field. With
-`BRIDGE_IMREADY4_ENABLED=true` the bridge does that step itself, a few minutes
-after your watch's morning sync has brought last night's HRV and resting heart
-rate into Intervals: same inputs, same 30-day z-scores, same zones, same field,
-so your existing chart keeps working. It reads Intervals only, writes only an
-empty `TrainingAdvice` (never one you or the script set, never a locked day),
-and writes nothing when the night's values or enough history are missing.
-`garmin-intervals-bridge imready4` shows today's advice with its reasoning,
-compares past days with what the field already holds, and fills days that have
-none. It is off by default. On the reference account it agrees with ImReady4's
-own results on 97.6 % of 1,225 days; the details, the differences and how to
-set it up are in [docs/IMREADY4.md](docs/IMREADY4.md).
-
-Experimental, next to it: `BRIDGE_HRVTREND_ENABLED=true` writes a second
+Experimental: `BRIDGE_HRVTREND_ENABLED=true` writes a second
 advice into a field of its own, `HRVTrendAdvice`, from the 7-day HRV trend
 against a 60-day normal range and the night's heart rate, as the HRV-guided
 training studies did – calmer than the single-day score, meant for comparing
@@ -412,13 +380,7 @@ Claude Desktop: open `futureweb-intervals-mcp-1.0.0b1.mcpb` from the
 `watch` timer (it starts every minute and looks when due, every 5 minutes by default) and a 30-minute full run, secrets in an
 `EnvironmentFile`, hardened units. See [deploy/README.md](deploy/README.md).
 
-**Windows, macOS or any PC without systemd:** `pip install garmin-intervals-bridge`
-(it is on [PyPI](https://pypi.org/project/garmin-intervals-bridge/)), then `garmin-intervals-bridge setup`
-(on Windows `py -m garmin_intervals_bridge setup`, which Smart App Control does not block).
-In the background it runs `run --apply`: one process that polls Intervals every 5 minutes, does a
-full run every 30 minutes and a health probe once a day, logging to `~/GarminBridge/bridge.log`.
-`garmin-intervals-bridge run --apply` does the same in a window. Step-by-step guides for
-non-technical users: [Windows](docs/WINDOWS.md), [Mac](docs/MAC.md).
+**Windows, macOS or any PC without systemd:** `pip install garmin-intervals-bridge`, then `garmin-intervals-bridge run --apply` in a window that stays open.
 
 ### Upload mode: when the official import is off
 
@@ -494,26 +456,6 @@ Prefer cron? Leave
 the service stopped and schedule `docker compose run --rm -T bridge watch --apply`
 every 5 minutes and `... sync --apply` every 30 minutes instead.
 
-### The web page
-
-`garmin-intervals-bridge ui` opens a page in your browser: whether the bridge runs and
-what it did last, the Garmin sign-in (MFA included – the way to renew an expired session
-without a terminal), the settings (the API key can be replaced, never shown), when it looks
-for new activities with a *Check now* button, the gear and chart plans with a button to carry
-them out, the past (*Actions → The past*: a backfill of activities or wellness for a date range, optionally
-with swap, started in the background – no terminal needed), today's training
-advice, the log. It
-listens on 127.0.0.1 only, and the link it opens carries a random key, so neither other
-users of the computer nor web pages in your browser can use it.
-
-Next to a running bridge – a container on a NAS – set `BRIDGE_UI_PORT=8765` and
-`BRIDGE_UI_PASSWORD` (8 characters or more) and publish the port; the page then asks
-for that password. With the systemd units, `deploy/systemd/garmin-intervals-bridge-ui.service`
-serves it the same way (see [deploy/README.md](deploy/README.md)). It is plain http: keep it in your home network or put it behind your
-NAS's HTTPS reverse proxy. Every form carries a per-session token, a page on 127.0.0.1
-answers only to its own host name, and nothing is written to Intervals or Garmin without
-a button that says so. Standard library only, no JavaScript.
-
 ### How often it looks
 
 Each look for new activities is one small request to Intervals.icu (in upload mode three to
@@ -530,9 +472,8 @@ lot of athletes on its own servers; fewer requests are kinder to it:
   around those hours, and every 30 minutes (`BRIDGE_POLL_QUIET_SECONDS`) at times you hardly
   ever finish one. It never looks faster than `BRIDGE_POLL_SECONDS`, and never outside
   `BRIDGE_POLL_HOURS` unless a quiet pace is set. It needs 15 activities in the archive; until
-  then it keeps the full pace. What it learned is in the log and on the web page; feedback is
+  then it keeps the full pace. What it learned is in the log; feedback is
   welcome in the [forum thread](https://forum.intervals.icu/t/132863).
-- *Check now* on the web page looks at once, and at the full pace for the hour after.
 
 The full runs every 30 minutes go on regardless, and they read Garmin's activity list every
 two hours: nothing is missed, a slower pace only means an activity may arrive later.
@@ -565,7 +506,7 @@ the command, so there is nothing new to protect. It prints one JSON result and e
 | 0 | `done` | Finished (`new` counts what was enriched or written) |
 | 2 | `pending` | `--wait-new`: nothing new yet after `BRIDGE_ONDEMAND_RETRIES` looks – try again later |
 | 3 | `paused` | Garmin or Intervals.icu asked for a break; `retry_after_seconds` says how long |
-| 4 | `login_needed` | Sign in to Garmin again (`login`, or the web page) |
+| 4 | `login_needed` | Sign in to Garmin again (`login`) |
 | 5 | `busy` | A running sync did not let go of its part within `BRIDGE_ONDEMAND_LOCK_WAIT_SECONDS` |
 | 1 | `error` | Anything else; `message` says what |
 
@@ -592,13 +533,13 @@ daily health check finds that needs a person.
   `BRIDGE_NTFY_URL=https://ntfy.sh/<a long topic name only you know>`; they carry the
   headline only.
 
-`setup` and the web page set both up and send a test message; `notify-test` does that too.
+`notify-test` sends a test message to the channels you set up.
 
 ## Configuration
 
 Variables can also come from a settings file: the one named by `--env-file` or
 `BRIDGE_ENV_FILE`, else `.env` in the working directory, else `~/GarminBridge/.env`
-(what `setup` writes; on Windows in your user folder). Variables already set always
+(on Windows in your user folder). Variables already set always
 win. Relative paths in a settings file count from its folder.
 
 | Variable | Default | Meaning |
@@ -614,14 +555,10 @@ win. Relative paths in a settings file count from its folder.
 | `BRIDGE_WELLNESS_PROFILE` | `recommended` | `recommended` or `all` custom fields |
 | `BRIDGE_GARMIN_REQUEST_DELAY` | `0.5` | Seconds between Garmin requests (minimum 0.25) |
 | `BRIDGE_STALE_HOURS` | `24` | `health` alerts once a service has failed this long |
-| `BRIDGE_IMREADY4_ENABLED` | `false` | `true`: write ImReady4's training advice into `TrainingAdvice` each morning (see [docs/IMREADY4.md](docs/IMREADY4.md)) |
 | `BRIDGE_HRVTREND_ENABLED` | `false` | `true`: write the experimental trend advice into `HRVTrendAdvice` each morning (see [docs/HRV_TREND.md](docs/HRV_TREND.md)) |
-| `BRIDGE_LOG_FILE` | | Also log to this file (5 MB, three old ones kept); `setup` sets `bridge.log` |
+| `BRIDGE_LOG_FILE` | | Also log to this file (5 MB, three old ones kept) |
 | `BRIDGE_ALLOW_ADMIN` | `false` | Windows: `true` lets the bridge run in a window opened *as administrator* (refused otherwise: folders created there are closed to the background bridge; see [docs/WINDOWS.md](docs/WINDOWS.md)) |
 | `BRIDGE_UPDATE_CHECK` | `true` | Once a day, ask pypi.org for the newest version and log a hint with the update command; `false` turns it off |
-| `BRIDGE_UI_PORT` | | `run` also serves the web page on this port (needs `BRIDGE_UI_PASSWORD`) |
-| `BRIDGE_UI_PASSWORD` | | Password for the web page next to `run`, or for `ui --host` other than 127.0.0.1; 8+ characters |
-| `BRIDGE_UI_HOST` | `127.0.0.1` (container: `0.0.0.0`) | Where the page next to `run` listens |
 | `BRIDGE_ALERT_EMAIL` | | Alerts by e-mail to this address, sent from its own mailbox (see [When the bridge needs you](#when-the-bridge-needs-you)) |
 | `BRIDGE_SMTP_PASSWORD` | | Password to send from that mailbox (often an app password) |
 | `BRIDGE_SMTP_HOST`, `_PORT`, `_USER`, `_FROM` | known for common providers; `587`; the address | Another mail server (465 = SSL, otherwise STARTTLS) |
@@ -722,8 +659,7 @@ variable. Changes apply at the next start.
 | `BRIDGE_BACKUP_RECENT_WELLNESS_DAYS` | `7` | 1–30 days | Each backup run considers the wellness of this many past days |
 | `BRIDGE_BACKUP_ACCOUNT_DAYS` | `7` | 1–90 days | The account data (profile, devices, zones ...) is archived this often |
 
-`BRIDGE_IN_CONTAINER` is set by the container image itself (no autostart, web page on all
-interfaces).
+`BRIDGE_IN_CONTAINER` is set by the container image itself.
 
 ## Known limitations
 
@@ -757,7 +693,7 @@ interfaces).
 | `Garmin login needed` (also as a note in the Intervals calendar) | Run `login` interactively in the same environment the service uses. |
 | `429` during `login` | The mobile login path was refused; the web path usually follows. Do not retry in a loop. |
 | `Another bridge instance is running (wellness)` | A backfill holds that part; the rest keeps running, and the bridge goes on with it once the backfill is done. For a backfill: another one is still working on that part. `(run)`: a background bridge runs already. |
-| Garmin values gone after *Reprocess file* in Intervals | `enrich <the activity's id or link> --apply`, or the web page's *Actions → One activity again*. |
+| Garmin values gone after *Reprocess file* in Intervals | `enrich <the activity's id or link> --apply`. |
 | `outcome: unmatched` | The official import has not created the activity yet; the next run looks again. |
 | `status` lists a *pending* upload | Upload mode: the request's outcome is unknown. Check Intervals before `reset-pending`. |
 | `203/EXEC Permission denied` under systemd | SELinux: the virtualenv must not live under a web document root. |

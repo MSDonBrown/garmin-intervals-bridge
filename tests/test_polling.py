@@ -201,22 +201,3 @@ def test_a_watch_that_is_not_due_ends_without_a_request(tmp_path, monkeypatch, c
     st.set_meta(polling.NOW_KEY, f"{st.last_run('watch') + 1:.0f}")         # "Check now"
     assert main(["watch"]) == 0 and looks == ["watch"]
     st.close()
-
-
-def test_check_now_wakes_a_waiting_run_loop(tmp_path, monkeypatch):
-    calls = []
-    monkeypatch.setattr(cli, "sync_enrich", lambda *a, **k: calls.append("sync") or {
-        "seen": 0, "enriched": 0, "planned": 0, "scan_skipped": 1})
-    monkeypatch.setattr(cli, "sync_wellness", lambda *a, **k: {"days_checked": 0, "writes": 0})
-    monkeypatch.setattr(cli, "watch_once", lambda *a, **k: calls.append("watch") or {"new": 0})
-    monkeypatch.setattr(cli, "wellness_check", lambda *a, **k: {})
-    monkeypatch.setattr(cli.time, "sleep", lambda s: pytest.fail("a loop with its web page waits on the button"))
-    settings = SimpleNamespace(data_dir=tmp_path, token_dir=tmp_path / "tokens", intervals_api_key="k",
-                               intervals_athlete_id="0", garmin_request_delay=0.5, timezone=VIENNA, activity_days=3,
-                               wellness_days=3, wellness_refresh_hours=4, wellness_profile="all", stale_hours=24,
-                               ui_port=8765)
-    st = Store(tmp_path)
-    polling.POLL_NOW.set()                                   # pressed while the full run was busy
-    cli.run_loop(settings, st, apply=False, poll_seconds=300, sync_minutes=30, iterations=2)
-    assert calls == ["sync", "watch"] and not polling.POLL_NOW.is_set()
-    st.close()

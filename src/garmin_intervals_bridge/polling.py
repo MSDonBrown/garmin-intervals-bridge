@@ -19,7 +19,6 @@ import json
 import logging
 import math
 import os
-import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -48,8 +47,6 @@ MIN_ACTIVITIES = tuning.default("BRIDGE_ADAPTIVE_MIN_ACTIVITIES")   # before tha
 FAST_SHARE = tuning.default("BRIDGE_ADAPTIVE_FAST_SHARE")
 MIDDLE_SHARE = tuning.default("BRIDGE_ADAPTIVE_MIDDLE_SHARE")
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-# Set by the web page's "Check now": a `run` in the same process stops waiting at once.
-POLL_NOW = threading.Event()
 # What a `run` in this process actually uses (its --mode and --poll-seconds), for its web page.
 ACTIVE: dict = {}
 
